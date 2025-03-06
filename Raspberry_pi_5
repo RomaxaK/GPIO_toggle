@@ -10,7 +10,7 @@
 int main() {
     int chip;
     
-    // Open GPIO chip 0 (Raspberry Pi uses gpiochip0)
+    // Open GPIO chip 0 (Raspberry Pi 5 uses gpiochip0)
     chip = lgpiochip_open(0);
     if (chip < 0) {
         perror("Failed to open GPIO chip");
@@ -18,24 +18,34 @@ int main() {
     }
 
     // Set GPIOs as output
-    lgpio_claim_output(chip, REQUEST_GPIO, 0);
-    lgpio_claim_output(chip, GRANT_GPIO, 0);
+    if (lgpio_claim_output(chip, 0, REQUEST_GPIO, 0) < 0 ||
+        lgpio_claim_output(chip, 0, GRANT_GPIO, 0) < 0) {
+        perror("Failed to set GPIO direction");
+        lgpiochip_close(chip);
+        return 1;
+    }
 
-    printf("Starting Request-Grant signal test\n");
+    printf("Starting Request-Grant signal test...\n");
 
     while (1) {
+        // Set request GPIO HIGH
         lgpio_write(chip, REQUEST_GPIO, 1);
         usleep(DELAY_US);
 
+        // Set grant GPIO HIGH
         lgpio_write(chip, GRANT_GPIO, 1);
         usleep(DELAY_US);
 
+        // Set both GPIOs LOW
         lgpio_write(chip, REQUEST_GPIO, 0);
         lgpio_write(chip, GRANT_GPIO, 0);
 
+        printf("Request sent, Grant given\n");
+
+        // Delay between cycles
         usleep(100000);  // 100ms delay
     }
 
-    lgpiochip_close(chip); // Clean up (never reached in this loop)
+    lgpiochip_close(chip); // Cleanup (never reached in loop)
     return 0;
 }
