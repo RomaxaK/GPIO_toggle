@@ -1,0 +1,34 @@
+#include <stdio.h>
+#include <pigpio.h>
+
+#define REQUEST_GPIO 17  // GPIO pin for request signal
+#define GRANT_GPIO 27    // GPIO pin for grant signal
+#define DELAY_US 1       // Minimal delay in microseconds
+
+int main() {
+    if (gpioInitialise() < 0) {
+        printf("Failed to initialize pigpio\n");
+        return 1;
+    }
+
+    gpioSetMode(REQUEST_GPIO, PI_OUTPUT);
+    gpioSetMode(GRANT_GPIO, PI_OUTPUT);
+
+    printf("Starting Request-Grant signal test\n");
+
+    while (1) {
+        gpioWrite(REQUEST_GPIO, 1);
+        gpioDelay(DELAY_US);
+
+        gpioWrite(GRANT_GPIO, 1);
+        gpioDelay(DELAY_US);
+
+        gpioWrite(REQUEST_GPIO, 0);
+        gpioWrite(GRANT_GPIO, 0);
+
+        gpioDelay(100000);  // 100ms delay
+    }
+
+    gpioTerminate(); // Clean up (never reached in this loop)
+    return 0;
+}
