@@ -33,14 +33,14 @@ void request_grant_task(void *pvParameter) {
         gpio_set_level(REQUEST_GPIO, 1);
         esp_rom_delay_us(DELAY_US);
 
-        // Print GPIO state
+        // Read the actual GPIO state after setting it HIGH
         ESP_LOGI(TAG, "REQUEST_GPIO: %d", gpio_get_level(REQUEST_GPIO));
 
         // Set grant GPIO HIGH
         gpio_set_level(GRANT_GPIO, 1);
         esp_rom_delay_us(DELAY_US);
 
-        // Print GPIO state
+        // Read the actual GPIO state after setting it HIGH
         ESP_LOGI(TAG, "GRANT_GPIO: %d", gpio_get_level(GRANT_GPIO));
 
         // Set both GPIOs LOW
