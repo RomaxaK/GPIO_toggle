@@ -10,7 +10,7 @@
 
 #define REQUEST_GPIO 4  // Optimized GPIOs
 #define GRANT_GPIO 5
-#define DELAY_US 1  // Reduced delay
+#define DELAY_US 1  // Minimal delay
 
 static const char *TAG = "GPIO_Latency";
 
@@ -25,30 +25,33 @@ void app_main(void) {
 
     ESP_LOGI(TAG, "Starting Request-Grant signal test");
 
-    // Use highest priority task
+    // Small startup delay to stabilize FreeRTOS task scheduling
+    vTaskDelay(pdMS_TO_TICKS(5));
+
+    // Use highest priority task pinned to core 0
     xTaskCreatePinnedToCore(request_grant_task, "request_grant_task", 2048, NULL, configMAX_PRIORITIES - 1, NULL, 0);
 }
 
 void request_grant_task(void *pvParameter) {
+    // First cycle - no delay or logging to reduce first-pulse latency
+    REG_WRITE(GPIO_OUT_W1TS_REG, (1 << REQUEST_GPIO)); // Set HIGH
+    REG_WRITE(GPIO_OUT_W1TS_REG, (1 << GRANT_GPIO));   // Set HIGH
+    REG_WRITE(GPIO_OUT_W1TC_REG, (1 << REQUEST_GPIO)); // Set LOW
+    REG_WRITE(GPIO_OUT_W1TC_REG, (1 << GRANT_GPIO));   // Set LOW
+
     while (1) {
         // Set request GPIO HIGH
         REG_WRITE(GPIO_OUT_W1TS_REG, (1 << REQUEST_GPIO));
-        ESP_LOGI(TAG, "REQUEST_GPIO SET TO HIGH");
-
-        // Read GPIO state
-        ESP_LOGI(TAG, "REQUEST_GPIO: %d", gpio_get_level(REQUEST_GPIO));
+        esp_rom_delay_us(DELAY_US);  // Minimal delay
 
         // Set grant GPIO HIGH
         REG_WRITE(GPIO_OUT_W1TS_REG, (1 << GRANT_GPIO));
-        ESP_LOGI(TAG, "GRANT_GPIO SET TO HIGH");
-
-        ESP_LOGI(TAG, "GRANT_GPIO: %d", gpio_get_level(GRANT_GPIO));
+        esp_rom_delay_us(DELAY_US);
 
         // Clear GPIOs (Set to LOW)
         REG_WRITE(GPIO_OUT_W1TC_REG, (1 << REQUEST_GPIO));
         REG_WRITE(GPIO_OUT_W1TC_REG, (1 << GRANT_GPIO));
-        ESP_LOGI(TAG, "Both GPIOs set to LOW");
 
-        ESP_LOGI(TAG, "Request sent, Grant given");
+        vTaskDelay(pdMS_TO_TICKS(100));  // Reduced delay to increase frequency
     }
 }
