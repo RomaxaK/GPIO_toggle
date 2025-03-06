@@ -1,34 +1,41 @@
 #include <stdio.h>
-#include <pigpio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <lgpio.h>
 
-#define REQUEST_GPIO 17  // GPIO pin for request signal
-#define GRANT_GPIO 27    // GPIO pin for grant signal
+#define REQUEST_GPIO 17  // GPIO for request signal
+#define GRANT_GPIO 27    // GPIO for grant signal
 #define DELAY_US 1       // Minimal delay in microseconds
 
 int main() {
-    if (gpioInitialise() < 0) {
-        printf("Failed to initialize pigpio\n");
+    int chip;
+    
+    // Open GPIO chip 0 (Raspberry Pi uses gpiochip0)
+    chip = lgpiochip_open(0);
+    if (chip < 0) {
+        perror("Failed to open GPIO chip");
         return 1;
     }
 
-    gpioSetMode(REQUEST_GPIO, PI_OUTPUT);
-    gpioSetMode(GRANT_GPIO, PI_OUTPUT);
+    // Set GPIOs as output
+    lgpio_claim_output(chip, REQUEST_GPIO, 0);
+    lgpio_claim_output(chip, GRANT_GPIO, 0);
 
     printf("Starting Request-Grant signal test\n");
 
     while (1) {
-        gpioWrite(REQUEST_GPIO, 1);
-        gpioDelay(DELAY_US);
+        lgpio_write(chip, REQUEST_GPIO, 1);
+        usleep(DELAY_US);
 
-        gpioWrite(GRANT_GPIO, 1);
-        gpioDelay(DELAY_US);
+        lgpio_write(chip, GRANT_GPIO, 1);
+        usleep(DELAY_US);
 
-        gpioWrite(REQUEST_GPIO, 0);
-        gpioWrite(GRANT_GPIO, 0);
+        lgpio_write(chip, REQUEST_GPIO, 0);
+        lgpio_write(chip, GRANT_GPIO, 0);
 
-        gpioDelay(100000);  // 100ms delay
+        usleep(100000);  // 100ms delay
     }
 
-    gpioTerminate(); // Clean up (never reached in this loop)
+    lgpiochip_close(chip); // Clean up (never reached in this loop)
     return 0;
 }
