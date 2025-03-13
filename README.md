@@ -4,13 +4,10 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_rom_sys.h"
-#include "soc/gpio_struct.h"
-#include "hal/gpio_hal.h"
-#include "esp32c6/rom/gpio.h"
 
-#define REQUEST_GPIO 4  // Optimized GPIOs
-#define GRANT_GPIO 5
-#define DELAY_US 1  // Minimal delay
+#define REQUEST_GPIO 4  // GPIO for request signal
+#define GRANT_GPIO 5    // GPIO for grant signal
+#define DELAY_US 1      // Minimal delay
 
 static const char *TAG = "GPIO_Latency";
 
@@ -25,33 +22,38 @@ void app_main(void) {
 
     ESP_LOGI(TAG, "Starting Request-Grant signal test");
 
-    // Small startup delay to stabilize FreeRTOS task scheduling
+    // Small startup delay
     vTaskDelay(pdMS_TO_TICKS(5));
 
-    // Use highest priority task pinned to core 0
+    // Create high-priority task pinned to core 0
     xTaskCreatePinnedToCore(request_grant_task, "request_grant_task", 2048, NULL, configMAX_PRIORITIES - 1, NULL, 0);
 }
 
 void request_grant_task(void *pvParameter) {
-    // First cycle - no delay or logging to reduce first-pulse latency
-    REG_WRITE(GPIO_OUT_W1TS_REG, (1 << REQUEST_GPIO)); // Set HIGH
-    REG_WRITE(GPIO_OUT_W1TS_REG, (1 << GRANT_GPIO));   // Set HIGH
-    REG_WRITE(GPIO_OUT_W1TC_REG, (1 << REQUEST_GPIO)); // Set LOW
-    REG_WRITE(GPIO_OUT_W1TC_REG, (1 << GRANT_GPIO));   // Set LOW
-
     while (1) {
         // Set request GPIO HIGH
-        REG_WRITE(GPIO_OUT_W1TS_REG, (1 << REQUEST_GPIO));
+        gpio_set_level(REQUEST_GPIO, 1);
         esp_rom_delay_us(DELAY_US);  // Minimal delay
 
-        // Set grant GPIO HIGH
-        REG_WRITE(GPIO_OUT_W1TS_REG, (1 << GRANT_GPIO));
+        // Generate random number (0-99)
+        int rand_value = esp_random() % 100;
+
+        // Grant access with 90% probability, deny with 10% probability
+        if (rand_value < 90) {
+            gpio_set_level(GRANT_GPIO, 1);  // Grant access
+            ESP_LOGI(TAG, "Access granted (Rand: %d)", rand_value);
+        } else {
+            gpio_set_level(GRANT_GPIO, 0);  // Deny access
+            ESP_LOGW(TAG, "Access denied (Rand: %d)", rand_value);
+        }
+
+        // Hold signal for a short time
         esp_rom_delay_us(DELAY_US);
 
-        // Clear GPIOs (Set to LOW)
-        REG_WRITE(GPIO_OUT_W1TC_REG, (1 << REQUEST_GPIO));
-        REG_WRITE(GPIO_OUT_W1TC_REG, (1 << GRANT_GPIO));
+        // Clear both signals
+        gpio_set_level(REQUEST_GPIO, 0);
+        gpio_set_level(GRANT_GPIO, 0);
 
-        vTaskDelay(pdMS_TO_TICKS(100));  // Reduced delay to increase frequency
+        vTaskDelay(pdMS_TO_TICKS(100));  // Adjust delay for testing
     }
 }
