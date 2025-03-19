@@ -2,59 +2,62 @@
 #include "freertos/task.h"
 #include "driver/gpio.h"
 #include "esp_timer.h"
+#include "esp_log.h"
+#include "soc/gpio_struct.h"
+#include "hal/gpio_hal.h"
 
 #define REQUEST_GPIO 4
 #define GRANT_GPIO 5
 #define DELAY_US 5  // Fine-tuned for minimal latency
 
+static const char *TAG = "GPIO_Latency";
 static volatile bool grant_high = false;
 
 void IRAM_ATTR grant_timer_callback(void *arg) {
+    ESP_DRAM_LOGI(TAG, "Grant timer triggered: grant_high = %d", grant_high);
     if (grant_high) {
-        REG_WRITE(GPIO_OUT_W1TS_REG, (1 << GRANT_GPIO));  // Set GRANT high
+        GPIO.out_w1ts = (1 << GRANT_GPIO);  // Set GRANT high
     } else {
-        REG_WRITE(GPIO_OUT_W1TC_REG, (1 << GRANT_GPIO));  // Set GRANT low
+        GPIO.out_w1tc = (1 << GRANT_GPIO);  // Set GRANT low
     }
 }
 
 void request_grant_task(void *pvParameter) {
-    int priority = *(int*)pvParameter;  // Retrieve priority value
-    esp_timer_handle_t grant_timer;
-    
-    // Configure High-Resolution Timer for precise control
-    const esp_timer_create_args_t grant_timer_args = {
-        .callback = &grant_timer_callback,
-        .name = "grant_timer"
-    };
-    esp_timer_create(&grant_timer_args, &grant_timer);
-    
-    while (1) {
-        uint32_t rand_value = esp_random() % 100;  // Precompute randomness
+    int priority = *(int*)pvParameter;  
+    ESP_LOGI(TAG, "Task started with priority: %d", priority);
 
-        // Determine grant signal state before GPIO toggling
+    while (1) {
+        uint32_t rand_value = esp_random() % 100;
         grant_high = (priority == 1 || rand_value < 90);
 
-        // Set REQUEST high
-        REG_WRITE(GPIO_OUT_W1TS_REG, (1 << REQUEST_GPIO));
-
-        // Start the grant timer to toggle GRANT_GPIO with minimal delay
-        esp_timer_start_once(grant_timer, DELAY_US);
-
-        // Wait for a short delay before clearing REQUEST
+        ESP_LOGI(TAG, "Setting REQUEST_GPIO high");
+        GPIO.out_w1ts = (1 << REQUEST_GPIO);  // Set REQUEST_GPIO high
         esp_rom_delay_us(DELAY_US);
-        REG_WRITE(GPIO_OUT_W1TC_REG, (1 << REQUEST_GPIO));  // Clear REQUEST
 
-        // Short sleep to simulate main loop iteration
-        vTaskDelay(pdMS_TO_TICKS(1));  // Keep FreeRTOS happy
+        // Directly set GRANT_GPIO instead of using a timer for testing
+        if (grant_high) {
+            ESP_LOGI(TAG, "Setting GRANT_GPIO high");
+            GPIO.out_w1ts = (1 << GRANT_GPIO);
+        } else {
+            ESP_LOGI(TAG, "Setting GRANT_GPIO low");
+            GPIO.out_w1tc = (1 << GRANT_GPIO);
+        }
+
+        ESP_LOGI(TAG, "Clearing REQUEST_GPIO and GRANT_GPIO");
+        GPIO.out_w1tc = (1 << REQUEST_GPIO); // Clear REQUEST
+        GPIO.out_w1tc = (1 << GRANT_GPIO);   // Ensure GRANT is reset
+
+        vTaskDelay(pdMS_TO_TICKS(1));  // Short delay to prevent watchdog reset
     }
 }
 
 void app_main(void) {
+    ESP_LOGI(TAG, "Initializing GPIOs...");
     gpio_reset_pin(REQUEST_GPIO);
     gpio_reset_pin(GRANT_GPIO);
     gpio_set_direction(REQUEST_GPIO, GPIO_MODE_OUTPUT);
     gpio_set_direction(GRANT_GPIO, GPIO_MODE_OUTPUT);
 
-    static int priority = 0; // Change to 1 to test priority effects
+    static int priority = 0;
     xTaskCreatePinnedToCore(request_grant_task, "request_grant_task", 2048, &priority, configMAX_PRIORITIES - 1, NULL, 0);
 }
