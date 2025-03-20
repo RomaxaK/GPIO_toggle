@@ -17,16 +17,20 @@
 
 static const char *TAG = "GPIO_Latency";
 static volatile bool grant_high = false;
+static volatile bool grant_pending = false;
 
 /**
  * @brief High-resolution timer callback to toggle GRANT_GPIO
  */
 void IRAM_ATTR grant_timer_callback(void *arg) {
-    ESP_DRAM_LOGI(TAG, "Grant timer triggered: grant_high = %d", grant_high);
-    if (grant_high) {
-        GPIO.out_w1ts.val = (1 << GRANT_GPIO);  // Set GRANT high
-    } else {
-        GPIO.out_w1tc.val = (1 << GRANT_GPIO);  // Set GRANT low
+    if (grant_pending) {
+        ESP_DRAM_LOGI(TAG, "Grant timer triggered: grant_high = %d", grant_high);
+        if (grant_high) {
+            GPIO.out_w1ts.val = (1 << GRANT_GPIO);  // Set GRANT high
+        } else {
+            GPIO.out_w1tc.val = (1 << GRANT_GPIO);  // Set GRANT low
+        }
+        grant_pending = false;  // Mark the request as processed
     }
 }
 
@@ -49,29 +53,27 @@ void request_grant_task(void *pvParameter) {
         uint32_t rand_value = esp_random() % 100;
         grant_high = (priority == 1 || rand_value < 90);
 
-        // TIME-CRITICAL SECTION: Set REQUEST_GPIO high
+        // Set REQUEST_GPIO high (Start of a new request)
         GPIO.out_w1ts.val = (1 << REQUEST_GPIO);
         esp_rom_delay_us(DELAY_US);  // Microsecond delay for synchronization
 
-        // Debug: Directly test grant toggling without timer
-        if (grant_high) {
-            GPIO.out_w1ts.val = (1 << GRANT_GPIO);
-        } else {
-            GPIO.out_w1tc.val = (1 << GRANT_GPIO);
+        // Ensure grant is only given once per request
+        if (!grant_pending) {
+            grant_pending = true;  // Mark a new request as pending
+
+            // Start the grant timer
+            esp_timer_stop(grant_timer);  // Stop timer before restarting
+            esp_err_t err = esp_timer_start_once(grant_timer, DELAY_US);
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to start grant timer: %d", err);
+            }
         }
 
-        // Debug: Check if `esp_timer` is causing the issue
-        esp_timer_stop(grant_timer);  // Stop timer before restarting
-        esp_err_t err = esp_timer_start_once(grant_timer, DELAY_US);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to start grant timer: %d", err);
-        }
-
-        // CLEAR REQUEST GPIO
+        // Clear REQUEST_GPIO after processing
         GPIO.out_w1tc.val = (1 << REQUEST_GPIO);
 
         // Reduced vTaskDelay to minimize task switching issues
-        vTaskDelay(pdMS_TO_TICKS(1));  
+        vTaskDelay(pdMS_TO_TICKS(5));  
     }
 }
 
@@ -86,5 +88,5 @@ void app_main(void) {
     gpio_set_direction(GRANT_GPIO, GPIO_MODE_OUTPUT);
 
     static int priority = 0;
-    xTaskCreatePinnedToCore(request_grant_task, "request_grant_task", 2048, &priority, configMAX_PRIORITIES - 1, NULL, 1);
+    xTaskCreatePinnedToCore(request_grant_task, "request_grant_task", 2048, &priority, configMAX_PRIORITIES - 1, NULL, tskNO_AFFINITY);
 }
