@@ -53,7 +53,15 @@ void request_grant_task(void *pvParameter) {
         GPIO.out_w1ts.val = (1 << REQUEST_GPIO);
         esp_rom_delay_us(DELAY_US);  // Microsecond delay for synchronization
 
-        // START HIGH-RESOLUTION TIMER FOR GRANT SIGNAL
+        // Debug: Directly test grant toggling without timer
+        if (grant_high) {
+            GPIO.out_w1ts.val = (1 << GRANT_GPIO);
+        } else {
+            GPIO.out_w1tc.val = (1 << GRANT_GPIO);
+        }
+
+        // Debug: Check if `esp_timer` is causing the issue
+        esp_timer_stop(grant_timer);  // Stop timer before restarting
         esp_err_t err = esp_timer_start_once(grant_timer, DELAY_US);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "Failed to start grant timer: %d", err);
@@ -62,8 +70,8 @@ void request_grant_task(void *pvParameter) {
         // CLEAR REQUEST GPIO
         GPIO.out_w1tc.val = (1 << REQUEST_GPIO);
 
-        // CONTROL SIGNAL FREQUENCY WITH vTaskDelay
-        vTaskDelay(pdMS_TO_TICKS(10));  
+        // Reduced vTaskDelay to minimize task switching issues
+        vTaskDelay(pdMS_TO_TICKS(1));  
     }
 }
 
@@ -78,5 +86,5 @@ void app_main(void) {
     gpio_set_direction(GRANT_GPIO, GPIO_MODE_OUTPUT);
 
     static int priority = 0;
-    xTaskCreatePinnedToCore(request_grant_task, "request_grant_task", 2048, &priority, configMAX_PRIORITIES - 1, NULL, 0);
+    xTaskCreatePinnedToCore(request_grant_task, "request_grant_task", 2048, &priority, configMAX_PRIORITIES - 1, NULL, 1);
 }
