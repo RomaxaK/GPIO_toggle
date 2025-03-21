@@ -41,7 +41,7 @@ void request_grant_task(void *pvParameter) {
     int priority = *(int*)pvParameter;  
     esp_timer_handle_t grant_timer;
 
-    // Initialize high-resolution timer for GRANT signal
+    // ✅ Initialize high-resolution timer for GRANT signal
     const esp_timer_create_args_t grant_timer_args = {
         .callback = &grant_timer_callback,
         .name = "grant_timer"
@@ -49,19 +49,19 @@ void request_grant_task(void *pvParameter) {
     esp_timer_create(&grant_timer_args, &grant_timer);
 
     while (1) {
-        // PRECOMPUTE GRANT SIGNAL STATUS
+        // ✅ PRECOMPUTE GRANT SIGNAL STATUS
         uint32_t rand_value = esp_random() % 100;
         grant_high = (priority == 1 || rand_value < 90);
 
-        // Set REQUEST_GPIO high (Start of a new request)
+        // ✅ Set REQUEST_GPIO high (Start of a new request)
         GPIO.out_w1ts.val = (1 << REQUEST_GPIO);
         esp_rom_delay_us(DELAY_US);  // Microsecond delay for synchronization
 
-        // Ensure grant is only given once per request
+        // ✅ Ensure grant is only given once per request
         if (!grant_pending) {
             grant_pending = true;  // Mark a new request as pending
 
-            // Start the grant timer
+            // ✅ Start the grant timer
             esp_timer_stop(grant_timer);  // Stop timer before restarting
             esp_err_t err = esp_timer_start_once(grant_timer, DELAY_US);
             if (err != ESP_OK) {
@@ -69,10 +69,10 @@ void request_grant_task(void *pvParameter) {
             }
         }
 
-        // Clear REQUEST_GPIO after processing
+        // ✅ Clear REQUEST_GPIO after processing
         GPIO.out_w1tc.val = (1 << REQUEST_GPIO);
 
-        // Reduced vTaskDelay to minimize task switching issues
+        // ✅ Reduced vTaskDelay to minimize task switching issues
         vTaskDelay(pdMS_TO_TICKS(5));  
     }
 }
