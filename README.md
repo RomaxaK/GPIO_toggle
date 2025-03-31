@@ -1,55 +1,33 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "driver/gpio.h"
-#include "esp_log.h"
-#include "esp_rom_sys.h"
+import matplotlib.pyplot as plt
 
-#define REQUEST_GPIO        4
-#define GRANT_GPIO          5
-#define DELAY_US            1
-#define REQUEST_PERIOD_MS   100
-#define GRANT_ACTIVE_LOW    1
+timestamps = []
+bitrate = []
 
-static const char *TAG = "GRANT_CTRL";
+with open("iperf3_output.txt", "r") as file:
+    for line in file:
+        if "sec" in line and "Mbits/sec" in line:
+            try:
+                # Example line format:
+                # [  5]  0.00-0.10 sec  1.32 MBytes  111 Mbits/sec  0  KBytes
+                parts = line.split()
+                time_range = parts[2]
+                mbps = float(parts[6])  # Bitrate in Mbits/sec
 
-void request_grant_task(void *pvParameter)
-{
-    int priority = (int)pvParameter;
+                # Extract mid-point of the interval (e.g., 0.05 for 0.00-0.10)
+                t_start, t_end = map(float, time_range.split('-'))
+                mid_time = (t_start + t_end) / 2
 
-    while (1) {
-        GPIO.out_wts.val = (1 << REQUEST_GPIO);
-        esp_rom_delay_us(DELAY_US);
+                timestamps.append(mid_time)
+                bitrate.append(mbps)
+            except (IndexError, ValueError):
+                continue  # Skip malformed lines
 
-#if GRANT_ACTIVE_LOW
-        GPIO.out_wtc.val = (1 << GRANT_GPIO);
-#else
-        GPIO.out_wts.val = (1 << GRANT_GPIO);
-#endif
-        esp_rom_delay_us(10);
-
-#if GRANT_ACTIVE_LOW
-        GPIO.out_wts.val = (1 << GRANT_GPIO);
-#else
-        GPIO.out_wtc.val = (1 << GRANT_GPIO);
-#endif
-
-        GPIO.out_wtc.val = (1 << REQUEST_GPIO);
-
-        vTaskDelay(pdMS_TO_TICKS(REQUEST_PERIOD_MS));
-    }
-}
-
-void app_main(void)
-{
-    ESP_LOGI(TAG, "Initializing GPIOs...");
-
-    gpio_reset_pin(REQUEST_GPIO);
-    gpio_reset_pin(GRANT_GPIO);
-    gpio_set_direction(REQUEST_GPIO, GPIO_MODE_OUTPUT);
-    gpio_set_direction(GRANT_GPIO, GPIO_MODE_OUTPUT);
-
-    static int priority = 0;
-    xTaskCreatePinnedToCore(request_grant_task, "request_grant_task", 2048, &priority, configMAX_PRIORITIES - 1, NULL, tskNO_AFFINITY);
-}
+# Plotting
+plt.figure(figsize=(10, 5))
+plt.plot(timestamps, bitrate, marker='o')
+plt.xlabel("Time (s)")
+plt.ylabel("Throughput (Mbits/sec)")
+plt.title("WiFi Throughput Over Time")
+plt.grid(True)
+plt.tight_layout()
+plt.show()
