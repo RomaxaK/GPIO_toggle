@@ -40,7 +40,7 @@ void request_grant_task(void *pvParameter) {
 
             // Optional: log every 1000 requests
             if (request_count % 1000 == 0) {
-                ESP_LOGI(TAG, "Requests: %u, Grants: %u", request_count, grant_count);
+                ESP_LOGI(TAG, "Requests: %" PRIu32 ", Grants: %" PRIu32, request_count, grant_count);
             }
         }
 
