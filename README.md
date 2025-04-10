@@ -9,21 +9,27 @@
 
 #define REQUEST_GPIO   GPIO_NUM_4
 #define GRANT_GPIO     GPIO_NUM_5
-#define PRIORITY_GPIO  GPIO_NUM_7  // NEW: priority is read from GPIO 7
+#define PRIORITY_GPIO  GPIO_NUM_7
 
 static const char *TAG = "GPIO_latency";
 
 void request_grant_task(void *pvParameter) {
+    uint32_t request_count = 0;
+    uint32_t grant_count = 0;
+
     while (1) {
         if (gpio_get_level(REQUEST_GPIO)) {
-            int priority = gpio_get_level(PRIORITY_GPIO);  // Read GPIO 7 for priority
+            request_count++;
+
+            int priority = gpio_get_level(PRIORITY_GPIO);
             uint32_t rand_value = esp_random() % 100;
             bool grant_low = (priority == 1 || rand_value < 10);
 
             if (grant_low) {
+                grant_count++;
                 GPIO.out_w1tc.val = (1 << GRANT_GPIO);
                 while (gpio_get_level(REQUEST_GPIO)) {
-                    ;  // wait while request is HIGH
+                    ;
                 }
                 GPIO.out_w1ts.val = (1 << GRANT_GPIO);
             } else {
@@ -31,7 +37,13 @@ void request_grant_task(void *pvParameter) {
                     ;
                 }
             }
+
+            // Optional: log every 1000 requests
+            if (request_count % 1000 == 0) {
+                ESP_LOGI(TAG, "Requests: %u, Grants: %u", request_count, grant_count);
+            }
         }
+
         esp_rom_delay_us(10);
     }
 }
@@ -54,7 +66,7 @@ void app_main(void) {
         .pin_bit_mask = (1ULL << PRIORITY_GPIO),
         .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,  // or ENABLE if needed
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_DISABLE
     };
     gpio_config(&priority_input);
