@@ -3,13 +3,21 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
-#include "esp_rom_sys.h"
-#include "esp_random.h"
 #include "esp_log.h"
+#include "esp_rom_sys.h"
+#include "soc/gpio_struct.h"
+#include "esp_intr_alloc.h"
+#include "soc/gpio_struct.h"
+#include "hal/gpio_hal.h"
+#include "esp32c6/rom/gpio.h"
+#include "esp_timer.h"
+#include "esp_system.h"
+#include "esp_random.h"
+#include "esp_mac.h"
 
-#define REQUEST_GPIO   GPIO_NUM_4
-#define GRANT_GPIO     GPIO_NUM_5
-#define PRIORITY_GPIO  GPIO_NUM_7
+#define REQUEST_GPIO   GPIO_NUM_6
+#define GRANT_GPIO     GPIO_NUM_7
+#define PRIORITY_GPIO  GPIO_NUM_10
 
 static const char *TAG = "GPIO_latency";
 
@@ -21,6 +29,7 @@ void request_grant_task(void *pvParameter) {
         if (gpio_get_level(REQUEST_GPIO)) {
             request_count++;
 
+            esp_rom_delay_us(1);
             int priority = gpio_get_level(PRIORITY_GPIO);
             uint32_t rand_value = esp_random() % 100;
             bool grant_low = (priority == 1 || rand_value < 10);
@@ -38,7 +47,6 @@ void request_grant_task(void *pvParameter) {
                 }
             }
 
-            // Optional: log every 1000 requests
             if (request_count % 1000 == 0) {
                 ESP_LOGI(TAG, "Requests: %" PRIu32 ", Grants: %" PRIu32, request_count, grant_count);
             }
