@@ -14,6 +14,7 @@
 #include "esp_system.h"
 #include "esp_random.h"
 #include "esp_mac.h"
+#include "esp_task_wdt.h"
 
 #define REQUEST_GPIO   GPIO_NUM_6
 #define GRANT_GPIO     GPIO_NUM_7
@@ -26,10 +27,13 @@ void request_grant_task(void *pvParameter) {
     uint32_t grant_count = 0;
 
     while (1) {
+        //esp_err_t  esp_task_wdt_reset();
+
         if (gpio_get_level(REQUEST_GPIO)) {
             request_count++;
 
-            esp_rom_delay_us(1);
+            esp_rom_delay_us(2);
+
             int priority = gpio_get_level(PRIORITY_GPIO);
             uint32_t rand_value = esp_random() % 100;
             bool grant_low = (priority == 1 || rand_value < 10);
@@ -47,12 +51,13 @@ void request_grant_task(void *pvParameter) {
                 }
             }
 
-            if (request_count % 1000 == 0) {
+            if (request_count % 10 == 0) {
                 ESP_LOGI(TAG, "Requests: %" PRIu32 ", Grants: %" PRIu32, request_count, grant_count);
             }
         }
 
-        esp_rom_delay_us(10);
+       // esp_rom_delay_us(2);
+
     }
 }
 
