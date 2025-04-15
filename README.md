@@ -19,6 +19,7 @@
 #define REQUEST_GPIO   GPIO_NUM_6
 #define GRANT_GPIO     GPIO_NUM_7
 #define PRIORITY_GPIO  GPIO_NUM_10
+#define GRANT_SWITCH   GPIO_NUM_11
 
 static const char *TAG = "GPIO_latency";
 
