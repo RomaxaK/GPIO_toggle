@@ -46,7 +46,6 @@ void request_grant_task(void *pvParameter) {
                     ;
                 }
 
-                // Set both GRANT and GRANT_SWITCH HIGH
                 GPIO.out_w1ts.val = (1 << GRANT_GPIO) | (1 << GRANT_SWITCH);
             } else {
                 while (gpio_get_level(REQUEST_GPIO)) {
@@ -62,17 +61,14 @@ void request_grant_task(void *pvParameter) {
 }
 
 void app_main(void) {
-    // Configure GRANT_GPIO as output and set HIGH
     gpio_reset_pin(GRANT_GPIO);
     gpio_set_direction(GRANT_GPIO, GPIO_MODE_OUTPUT);
     GPIO.out_w1ts.val = (1 << GRANT_GPIO);
 
-    // Configure GRANT_SWITCH as output and set HIGH
     gpio_reset_pin(GRANT_SWITCH);
     gpio_set_direction(GRANT_SWITCH, GPIO_MODE_OUTPUT);
     GPIO.out_w1ts.val = (1 << GRANT_SWITCH);
 
-    // Configure REQUEST input
     gpio_config_t request_input = {
         .pin_bit_mask = (1ULL << REQUEST_GPIO),
         .mode = GPIO_MODE_INPUT,
@@ -82,7 +78,6 @@ void app_main(void) {
     };
     gpio_config(&request_input);
 
-    // Configure PRIORITY input
     gpio_config_t priority_input = {
         .pin_bit_mask = (1ULL << PRIORITY_GPIO),
         .mode = GPIO_MODE_INPUT,
@@ -92,6 +87,5 @@ void app_main(void) {
     };
     gpio_config(&priority_input);
 
-    // Start the main task
     xTaskCreatePinnedToCore(request_grant_task, "request_grant_task", 2048, NULL, configMAX_PRIORITIES - 1, NULL, tskNO_AFFINITY);
 }
