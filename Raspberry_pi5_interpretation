@@ -1,34 +1,49 @@
-#include <stdio.h>
-#include <pigpio.h>
+import tkinter as tk
+import serial
+import threading
 
-#define REQUEST_GPIO 17  // GPIO pin for request signal
-#define GRANT_GPIO 27    // GPIO pin for grant signal
-#define DELAY_US 1       // Minimal delay in microseconds
+# Adjust COM port and baud rate if needed
+SERIAL_PORT = 'COM6'
+BAUD_RATE = 115200
 
-int main() {
-    if (gpioInitialise() < 0) {
-        printf("Failed to initialize pigpio\n");
-        return 1;
-    }
+class SerialReader(threading.Thread):
+    def __init__(self, callback):
+        super().__init__(daemon=True)
+        self.callback = callback
+        self.ser = serial.Serial(SERIAL_PORT, BAUD_RATE)
+    
+    def run(self):
+        while True:
+            try:
+                line = self.ser.readline().decode(errors='ignore').strip()
+                if "Requests:" in line and "Grants:" in line:
+                    # Example line: "GPIO_latency: Requests: 240, Grants: 240"
+                    parts = line.split("Requests:")[1].split(", Grants:")
+                    requests = int(parts[0].strip())
+                    grants = int(parts[1].strip())
+                    self.callback(requests, grants)
+            except Exception as e:
+                print(f"Serial error: {e}")
 
-    gpioSetMode(REQUEST_GPIO, PI_OUTPUT);
-    gpioSetMode(GRANT_GPIO, PI_OUTPUT);
+class StatsGUI:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("ESP32 Request/Grant Monitor")
 
-    printf("Starting Request-Grant signal test\n");
+        self.request_label = tk.Label(root, text="Requests: 0", font=("Arial", 18))
+        self.request_label.pack(pady=10)
 
-    while (1) {
-        gpioWrite(REQUEST_GPIO, 1);
-        gpioDelay(DELAY_US);
+        self.grant_label = tk.Label(root, text="Grants: 0", font=("Arial", 18))
+        self.grant_label.pack(pady=10)
 
-        gpioWrite(GRANT_GPIO, 1);
-        gpioDelay(DELAY_US);
+        self.reader = SerialReader(self.update_stats)
+        self.reader.start()
 
-        gpioWrite(REQUEST_GPIO, 0);
-        gpioWrite(GRANT_GPIO, 0);
+    def update_stats(self, requests, grants):
+        self.request_label.config(text=f"Requests: {requests}")
+        self.grant_label.config(text=f"Grants: {grants}")
 
-        gpioDelay(100000);  // 100ms delay
-    }
-
-    gpioTerminate(); // Clean up (never reached in this loop)
-    return 0;
-}
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = StatsGUI(root)
+    root.mainloop()
