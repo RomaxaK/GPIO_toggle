@@ -2,8 +2,8 @@ import tkinter as tk
 import serial
 import threading
 
-# Adjust COM port and baud rate if needed
-SERIAL_PORT = 'COM6'
+# --- Serial Settings ---
+SERIAL_PORT = 'COM6'      # Update this to your correct port
 BAUD_RATE = 115200
 
 class SerialReader(threading.Thread):
@@ -16,11 +16,13 @@ class SerialReader(threading.Thread):
         while True:
             try:
                 line = self.ser.readline().decode(errors='ignore').strip()
-                if "Requests:" in line and "Grants:" in line:
-                    # Example line: "GPIO_latency: Requests: 240, Grants: 240"
-                    parts = line.split("Requests:")[1].split(", Grants:")
-                    requests = int(parts[0].strip())
-                    grants = int(parts[1].strip())
+                print(f"RAW: {line}")  # Optional: shows full line in terminal
+
+                if line.startswith("STATS"):
+                    # Format: STATS,<request_count>,<grant_count>
+                    _, request_str, grant_str = line.split(',')
+                    requests = int(request_str.strip())
+                    grants = int(grant_str.strip())
                     self.callback(requests, grants)
             except Exception as e:
                 print(f"Serial error: {e}")
@@ -30,12 +32,15 @@ class StatsGUI:
         self.root = root
         self.root.title("ESP32 Request/Grant Monitor")
 
+        # --- Request Label ---
         self.request_label = tk.Label(root, text="Requests: 0", font=("Arial", 18))
         self.request_label.pack(pady=10)
 
+        # --- Grant Label ---
         self.grant_label = tk.Label(root, text="Grants: 0", font=("Arial", 18))
         self.grant_label.pack(pady=10)
 
+        # --- Start Serial Reader Thread ---
         self.reader = SerialReader(self.update_stats)
         self.reader.start()
 
