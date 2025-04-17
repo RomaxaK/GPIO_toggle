@@ -2,28 +2,33 @@ import tkinter as tk
 import serial
 import threading
 
-# --- Serial Settings ---
-SERIAL_PORT = 'COM6'      # Update this to your correct port
+# Serial settings — change COM port as needed
+SERIAL_PORT = 'COM6'      # <-- Change this if needed
 BAUD_RATE = 115200
 
 class SerialReader(threading.Thread):
     def __init__(self, callback):
         super().__init__(daemon=True)
         self.callback = callback
-        self.ser = serial.Serial(SERIAL_PORT, BAUD_RATE)
-    
+        self.ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
+
     def run(self):
         while True:
             try:
                 line = self.ser.readline().decode(errors='ignore').strip()
-                print(f"RAW: {line}")  # Optional: shows full line in terminal
-
                 if line.startswith("STATS"):
-                    # Format: STATS,<request_count>,<grant_count>
-                    _, request_str, grant_str = line.split(',')
-                    requests = int(request_str.strip())
-                    grants = int(grant_str.strip())
-                    self.callback(requests, grants)
+                    parts = line.split(',')
+                    if len(parts) == 3:
+                        try:
+                            _, req_str, grant_str = parts
+                            requests = int(req_str.strip())
+                            grants = int(grant_str.strip())
+                            self.callback(requests, grants, line)
+                        except ValueError:
+                            print(f"Bad parse: {line}")
+                else:
+                    # Optional: print other logs for debug
+                    print(f"Ignored: {line}")
             except Exception as e:
                 print(f"Serial error: {e}")
 
@@ -32,21 +37,35 @@ class StatsGUI:
         self.root = root
         self.root.title("ESP32 Request/Grant Monitor")
 
-        # --- Request Label ---
+        # State tracking to avoid duplicates
+        self.last_line = ""
+        self.last_requests = -1
+        self.last_grants = -1
+
+        # Labels
         self.request_label = tk.Label(root, text="Requests: 0", font=("Arial", 18))
         self.request_label.pack(pady=10)
 
-        # --- Grant Label ---
         self.grant_label = tk.Label(root, text="Grants: 0", font=("Arial", 18))
         self.grant_label.pack(pady=10)
 
-        # --- Start Serial Reader Thread ---
+        # Start serial reading thread
         self.reader = SerialReader(self.update_stats)
         self.reader.start()
 
-    def update_stats(self, requests, grants):
-        self.request_label.config(text=f"Requests: {requests}")
-        self.grant_label.config(text=f"Grants: {grants}")
+    def update_stats(self, requests, grants, raw_line=None):
+        # Skip duplicates (same raw line received again)
+        if raw_line == self.last_line:
+            return
+        self.last_line = raw_line
+
+        if requests != self.last_requests:
+            self.request_label.config(text=f"Requests: {requests}")
+            self.last_requests = requests
+
+        if grants != self.last_grants:
+            self.grant_label.config(text=f"Grants: {grants}")
+            self.last_grants = grants
 
 if __name__ == "__main__":
     root = tk.Tk()
