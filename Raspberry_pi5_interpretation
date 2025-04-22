@@ -2,16 +2,15 @@ import tkinter as tk
 import serial
 import threading
 
-# Serial settings — change COM port as needed
-SERIAL_PORT = 'COM6'      # <-- Change this if needed
+SERIAL_PORT = 'COM6'  # <-- Update this as needed
 BAUD_RATE = 115200
 
 class SerialReader(threading.Thread):
-    def __init__(self, callback):
+    def __init__(self, callback, port=SERIAL_PORT, baud=BAUD_RATE):
         super().__init__(daemon=True)
         self.callback = callback
-        self.ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
-
+        self.ser = serial.Serial(port, baud, timeout=1)
+    
     def run(self):
         while True:
             try:
@@ -20,49 +19,71 @@ class SerialReader(threading.Thread):
                     parts = line.split(',')
                     if len(parts) == 3:
                         try:
-                            _, req_str, grant_str = parts
-                            requests = int(req_str.strip())
-                            grants = int(grant_str.strip())
-                            self.callback(requests, grants, line)
-                        except ValueError:
-                            print(f"Bad parse: {line}")
-                else:
-                    # Optional: print other logs for debug
-                    print(f"Ignored: {line}")
+                            _, req, grant = parts
+                            self.callback(int(req.strip()), int(grant.strip()), line)
+                        except:
+                            pass
             except Exception as e:
                 print(f"Serial error: {e}")
+
+    def send_command(self, cmd: str):
+        print(f"Sending: {cmd}")
+        self.ser.write((cmd + '\n').encode())
 
 class StatsGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("ESP32 Request/Grant Monitor")
+        self.root.title("ESP32 Request/Grant Control Panel")
 
-        # State tracking to avoid duplicates
         self.last_line = ""
         self.last_requests = -1
         self.last_grants = -1
 
-        # Labels
-        self.request_label = tk.Label(root, text="Requests: 0", font=("Arial", 18))
-        self.request_label.pack(pady=10)
-
-        self.grant_label = tk.Label(root, text="Grants: 0", font=("Arial", 18))
-        self.grant_label.pack(pady=10)
-
-        # Start serial reading thread
         self.reader = SerialReader(self.update_stats)
         self.reader.start()
 
-    def update_stats(self, requests, grants, raw_line=None):
-        # Skip duplicates (same raw line received again)
+        self.create_widgets()
+
+    def create_widgets(self):
+        # Requests and Grants
+        self.req_label = tk.Label(self.root, text="Requests: 0", font=("Arial", 18))
+        self.req_label.pack(pady=5)
+        self.grant_label = tk.Label(self.root, text="Grants: 0", font=("Arial", 18))
+        self.grant_label.pack(pady=5)
+
+        # Priority Mode Dropdown
+        mode_frame = tk.Frame(self.root)
+        mode_frame.pack(pady=10)
+        tk.Label(mode_frame, text="PRIO Mode: ").pack(side=tk.LEFT)
+        self.mode_var = tk.StringVar(value="INPUT")
+        mode_menu = tk.OptionMenu(mode_frame, self.mode_var, "INPUT", "OUTPUT", command=self.change_mode)
+        mode_menu.pack(side=tk.LEFT)
+
+        # Priority State Buttons
+        state_frame = tk.Frame(self.root)
+        state_frame.pack(pady=10)
+        tk.Label(state_frame, text="PRIO State: ").pack(side=tk.LEFT)
+        tk.Button(state_frame, text="HIGH", command=lambda: self.reader.send_command("CMD,PRIO_SET,HIGH")).pack(side=tk.LEFT, padx=5)
+        tk.Button(state_frame, text="LOW", command=lambda: self.reader.send_command("CMD,PRIO_SET,LOW")).pack(side=tk.LEFT, padx=5)
+
+        # Randomness Toggle
+        random_frame = tk.Frame(self.root)
+        random_frame.pack(pady=10)
+        tk.Label(random_frame, text="Randomness: ").pack(side=tk.LEFT)
+        tk.Button(random_frame, text="Enable", command=lambda: self.reader.send_command("CMD,USE_RANDOM,ON")).pack(side=tk.LEFT, padx=5)
+        tk.Button(random_frame, text="Disable", command=lambda: self.reader.send_command("CMD,USE_RANDOM,OFF")).pack(side=tk.LEFT, padx=5)
+
+    def change_mode(self, mode):
+        self.reader.send_command(f"CMD,PRIO_MODE,{mode}")
+
+    def update_stats(self, requests, grants, raw_line):
         if raw_line == self.last_line:
             return
         self.last_line = raw_line
 
         if requests != self.last_requests:
-            self.request_label.config(text=f"Requests: {requests}")
+            self.req_label.config(text=f"Requests: {requests}")
             self.last_requests = requests
-
         if grants != self.last_grants:
             self.grant_label.config(text=f"Grants: {grants}")
             self.last_grants = grants
