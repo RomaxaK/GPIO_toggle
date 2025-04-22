@@ -1,15 +1,20 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
-#include "driver/uart.h"
 #include "esp_log.h"
 #include "esp_rom_sys.h"
+#include "soc/gpio_struct.h"
+#include "esp_intr_alloc.h"
+#include "hal/gpio_hal.h"
+#include "esp32c6/rom/gpio.h"
 #include "esp_timer.h"
 #include "esp_system.h"
 #include "esp_random.h"
+#include "esp_mac.h"
+#include "esp_task_wdt.h"
+#include "driver/uart.h"
 
 #define REQUEST_GPIO    GPIO_NUM_6
 #define GRANT_GPIO      GPIO_NUM_7
