@@ -4,18 +4,12 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
+#include "driver/uart.h"
 #include "esp_log.h"
 #include "esp_rom_sys.h"
-#include "soc/gpio_struct.h"
-#include "esp_intr_alloc.h"
-#include "hal/gpio_hal.h"
-#include "esp32c6/rom/gpio.h"
 #include "esp_timer.h"
 #include "esp_system.h"
 #include "esp_random.h"
-#include "esp_mac.h"
-#include "esp_task_wdt.h"
-#include "driver/uart.h"
 
 #define REQUEST_GPIO    GPIO_NUM_6
 #define GRANT_GPIO      GPIO_NUM_7
@@ -25,10 +19,9 @@
 #define UART_PORT       UART_NUM_0
 #define UART_BUF_SIZE   128
 
-static const char *TAG = "GPIO_latency";
-
 static bool use_random = true;
 static bool priority_gpio_is_output = false;
+static int priority_value = 0;  // 0 = LOW, 1 = HIGH
 
 void uart_command_task(void *arg) {
     uint8_t data[UART_BUF_SIZE];
@@ -36,7 +29,10 @@ void uart_command_task(void *arg) {
     while (1) {
         int len = uart_read_bytes(UART_PORT, data, sizeof(data) - 1, pdMS_TO_TICKS(100));
         if (len > 0) {
-            data[len] = '\0';
+            data[len] = '\0';  // Null-terminate
+            data[strcspn((char *)data, "\r\n")] = 0;  // Strip newline
+
+            printf("RECEIVED: %s\n", data);
             char *cmd = (char *)data;
 
             if (strncmp(cmd, "CMD,PRIO_MODE,INPUT", 19) == 0) {
@@ -46,12 +42,19 @@ void uart_command_task(void *arg) {
             } else if (strncmp(cmd, "CMD,PRIO_MODE,OUTPUT", 20) == 0) {
                 gpio_set_direction(PRIORITY_GPIO, GPIO_MODE_OUTPUT);
                 priority_gpio_is_output = true;
+                gpio_set_level(PRIORITY_GPIO, priority_value);  // apply current value
                 printf("PRIO_MODE set to OUTPUT\n");
-            } else if (strncmp(cmd, "CMD,PRIO_SET,HIGH", 17) == 0 && priority_gpio_is_output) {
-                gpio_set_level(PRIORITY_GPIO, 1);
+            } else if (strncmp(cmd, "CMD,PRIO_SET,HIGH", 17) == 0) {
+                priority_value = 1;
+                if (priority_gpio_is_output) {
+                    gpio_set_level(PRIORITY_GPIO, 1);
+                }
                 printf("PRIO set to HIGH\n");
-            } else if (strncmp(cmd, "CMD,PRIO_SET,LOW", 16) == 0 && priority_gpio_is_output) {
-                gpio_set_level(PRIORITY_GPIO, 0);
+            } else if (strncmp(cmd, "CMD,PRIO_SET,LOW", 16) == 0) {
+                priority_value = 0;
+                if (priority_gpio_is_output) {
+                    gpio_set_level(PRIORITY_GPIO, 0);
+                }
                 printf("PRIO set to LOW\n");
             } else if (strncmp(cmd, "CMD,USE_RANDOM,ON", 17) == 0) {
                 use_random = true;
@@ -76,7 +79,7 @@ void request_grant_task(void *pvParameter) {
 
             esp_rom_delay_us(2);
 
-            int priority = gpio_get_level(PRIORITY_GPIO);
+            int priority = priority_gpio_is_output ? priority_value : gpio_get_level(PRIORITY_GPIO);
             uint32_t rand_value = esp_random() % 100;
             bool grant_low = (priority == 1 || (!priority_gpio_is_output && use_random && rand_value < 10));
 
@@ -84,14 +87,11 @@ void request_grant_task(void *pvParameter) {
                 grant_count++;
 
                 GPIO.out_w1tc.val = (1 << GRANT_GPIO) | (1 << GRANT_SWITCH);
-
                 while (gpio_get_level(REQUEST_GPIO)) {
                     ;
                 }
-
                 GPIO.out_w1ts.val = (1 << GRANT_GPIO) | (1 << GRANT_SWITCH);
 
-                // Send stats only when a grant is made
                 printf("STATS,%lu,%lu\n", request_count, grant_count);
             } else {
                 while (gpio_get_level(REQUEST_GPIO)) {
@@ -103,7 +103,7 @@ void request_grant_task(void *pvParameter) {
 }
 
 void app_main(void) {
-    // Set up GRANT output pins
+    // Configure GRANT and SWITCH as output
     gpio_reset_pin(GRANT_GPIO);
     gpio_set_direction(GRANT_GPIO, GPIO_MODE_OUTPUT);
     GPIO.out_w1ts.val = (1 << GRANT_GPIO);
@@ -112,7 +112,7 @@ void app_main(void) {
     gpio_set_direction(GRANT_SWITCH, GPIO_MODE_OUTPUT);
     GPIO.out_w1ts.val = (1 << GRANT_SWITCH);
 
-    // Configure PRIORITY as input by default
+    // Configure PRIO as input by default
     gpio_reset_pin(PRIORITY_GPIO);
     gpio_set_direction(PRIORITY_GPIO, GPIO_MODE_INPUT);
     gpio_set_pull_mode(PRIORITY_GPIO, GPIO_FLOATING);
@@ -127,7 +127,7 @@ void app_main(void) {
     };
     gpio_config(&request_input);
 
-    // Set up UART for command reception
+    // UART config
     const uart_config_t uart_config = {
         .baud_rate = 115200,
         .data_bits = UART_DATA_8_BITS,
@@ -138,7 +138,7 @@ void app_main(void) {
     uart_param_config(UART_PORT, &uart_config);
     uart_driver_install(UART_PORT, UART_BUF_SIZE * 2, 0, 0, NULL, 0);
 
-    // Start main tasks
+    // Launch tasks
     xTaskCreatePinnedToCore(request_grant_task, "request_grant_task", 2048, NULL, configMAX_PRIORITIES - 1, NULL, tskNO_AFFINITY);
     xTaskCreatePinnedToCore(uart_command_task, "uart_command_task", 2048, NULL, 5, NULL, tskNO_AFFINITY);
 }
