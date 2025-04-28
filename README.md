@@ -19,6 +19,8 @@ void uart_task(void *arg) {
         int len = uart_read_bytes(UART_PORT, data, sizeof(data) - 1, pdMS_TO_TICKS(500));
         if (len > 0) {
             data[len] = '\0';  // Null-terminate
+            // Strip newline characters
+            data[strcspn((char *)data, "\r\n")] = '\0';
             printf("Received UART (%d bytes): %s\n", len, data);
         }
     }
@@ -34,12 +36,16 @@ void app_main(void) {
         .parity    = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
     };
+
+    // Apply UART configuration
+    uart_driver_install(UART_PORT, UART_BUF_SIZE * 2, UART_BUF_SIZE * 2, 0, NULL, 0);
     uart_param_config(UART_PORT, &uart_config);
     uart_set_pin(UART_PORT, UART_TX_PIN, UART_RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-    uart_driver_install(UART_PORT, UART_BUF_SIZE * 2, UART_BUF_SIZE * 2, 0, NULL, 0);
 
     printf("UART configured\n");
 
-    xTaskCreate(uart_task, "uart_task", 4096, NULL, 10, NULL);
+    // Start the UART task
+    xTaskCreatePinnedToCore(uart_task, "uart_task", 4096, NULL, 10, NULL, tskNO_AFFINITY);
 }
