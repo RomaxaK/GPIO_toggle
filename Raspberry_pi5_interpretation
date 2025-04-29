@@ -6,7 +6,7 @@ SERIAL_PORT = 'COM9'
 BAUD_RATE = 115200
 
 class SerialReader(threading.Thread):
-    def __init__(self, callback, port=SERIAL_PORT, baud=BAUD_RATE):
+    def __init__(self, callback=None, port=SERIAL_PORT, baud=BAUD_RATE):
         super().__init__(daemon=True)
         self.callback = callback
         self.ser = serial.Serial(port, baud, timeout=1)
@@ -15,7 +15,7 @@ class SerialReader(threading.Thread):
         while True:
             try:
                 line = self.ser.readline().decode(errors='ignore').strip()
-                if line.startswith("STATS"):
+                if line.startswith("STATS") and self.callback:
                     parts = line.split(',')
                     if len(parts) == 3:
                         try:
@@ -35,82 +35,25 @@ class SerialReader(threading.Thread):
                 print(f"Write error: {e}")
         threading.Thread(target=send, daemon=True).start()
 
-class StatsGUI:
+class SimpleGrantGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("ESP32 Request/Grant Control Panel")
+        self.root.title("Grant Mode Control")
 
-        self.last_line = ""
-        self.last_requests = -1
-        self.last_grants = -1
-
-        self.reader = SerialReader(self.update_stats)
+        self.reader = SerialReader()
         self.reader.start()
 
         self.create_widgets()
 
     def create_widgets(self):
-        # Request/Grant labels
-        self.req_label = tk.Label(self.root, text="Requests: 0", font=("Arial", 18))
-        self.req_label.pack(pady=5)
-
-        self.grant_label = tk.Label(self.root, text="Grants: 0", font=("Arial", 18))
-        self.grant_label.pack(pady=5)
-
-        # PRIO Mode dropdown
-        mode_frame = tk.Frame(self.root)
-        mode_frame.pack(pady=10)
-        tk.Label(mode_frame, text="PRIO Mode: ").pack(side=tk.LEFT)
-        self.mode_var = tk.StringVar(value="INPUT")
-        mode_menu = tk.OptionMenu(mode_frame, self.mode_var, "INPUT", "OUTPUT", command=self.change_mode)
-        mode_menu.pack(side=tk.LEFT)
-
-        # PRIO State buttons
-        state_frame = tk.Frame(self.root)
-        state_frame.pack(pady=10)
-        tk.Label(state_frame, text="PRIO State: ").pack(side=tk.LEFT)
-
-        self.prio_high_btn = tk.Button(state_frame, text="HIGH",
-                                       command=lambda: self.reader.send_command_async("CMD,PRIO_SET,HIGH"))
-        self.prio_high_btn.pack(side=tk.LEFT, padx=5)
-
-        self.prio_low_btn = tk.Button(state_frame, text="LOW",
-                                      command=lambda: self.reader.send_command_async("CMD,PRIO_SET,LOW"))
-        self.prio_low_btn.pack(side=tk.LEFT, padx=5)
-
-        # Randomness toggle
-        random_frame = tk.Frame(self.root)
-        random_frame.pack(pady=10)
-        tk.Label(random_frame, text="Randomness: ").pack(side=tk.LEFT)
-        tk.Button(random_frame, text="Enable", command=lambda: self.reader.send_command_async("CMD,USE_RANDOM,ON")).pack(side=tk.LEFT, padx=5)
-        tk.Button(random_frame, text="Disable", command=lambda: self.reader.send_command_async("CMD,USE_RANDOM,OFF")).pack(side=tk.LEFT, padx=5)
-
-        # Start with PRIO buttons disabled (assuming INPUT mode)
-        self.set_prio_buttons_state(tk.DISABLED)
-
-    def set_prio_buttons_state(self, state):
-        self.prio_high_btn.config(state=state)
-        self.prio_low_btn.config(state=state)
-
-    def change_mode(self, mode):
-        self.reader.send_command_async(f"CMD,PRIO_MODE,{mode}")
-        is_output = (mode == "OUTPUT")
-        self.set_prio_buttons_state(tk.NORMAL if is_output else tk.DISABLED)
-
-    def update_stats(self, requests, grants, raw_line):
-        if raw_line == self.last_line:
-            return
-        self.last_line = raw_line
-
-        if requests != self.last_requests:
-            self.req_label.config(text=f"Requests: {requests}")
-            self.last_requests = requests
-
-        if grants != self.last_grants:
-            self.grant_label.config(text=f"Grants: {grants}")
-            self.last_grants = grants
+        tk.Button(self.root, text="Always Grant", width=25,
+                  command=lambda: self.reader.send_command_async("CMD,GRANT_MODE,ALWAYS")).pack(pady=10)
+        tk.Button(self.root, text="No Grant", width=25,
+                  command=lambda: self.reader.send_command_async("CMD,GRANT_MODE,NONE")).pack(pady=10)
+        tk.Button(self.root, text="Random Grant", width=25,
+                  command=lambda: self.reader.send_command_async("CMD,GRANT_MODE,RANDOM")).pack(pady=10)
 
 if __name__ == "__main__":
     root = tk.Tk()
-    app = StatsGUI(root)
+    app = SimpleGrantGUI(root)
     root.mainloop()
