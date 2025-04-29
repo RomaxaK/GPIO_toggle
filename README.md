@@ -1,16 +1,20 @@
 void request_grant_task(void *arg) {
+    static uint32_t request_count = 0;
+    static uint32_t grant_count = 0;
+    int last_request = 0;
+    int grant_active = 0;
+
     ESP_LOGI(TAG, "Request-Grant task started");
 
-    static int last_request = 0;
-
     while (1) {
-        int current_request = gpio_get_level(REQUEST_GPIO);
+        int request = gpio_get_level(REQUEST_GPIO);
+        int priority = gpio_get_level(PRIORITY_GPIO);
+        bool grant = false;
 
-        if (current_request && !last_request) {
-            // Rising edge detected
+        // Rising edge of REQUEST
+        if (request && !last_request) {
             request_count++;
 
-            bool grant = false;
             switch (current_grant_mode) {
                 case GRANT_MODE_ALWAYS:
                     grant = true;
@@ -26,20 +30,30 @@ void request_grant_task(void *arg) {
             if (grant) {
                 gpio_set_level(GRANT_GPIO, 1);
                 gpio_set_level(SWITCH_GRANT_GPIO, 1);
-                ets_delay_us(10);  // Pulse duration
-                gpio_set_level(GRANT_GPIO, 0);
-                gpio_set_level(SWITCH_GRANT_GPIO, 0);
+                grant_active = 1;
                 grant_count++;
             }
-
-            // Send stats back over UART
-            char stats_msg[64];
-            snprintf(stats_msg, sizeof(stats_msg), "STATS,%d,%d\n", request_count, grant_count);
-            uart_write_bytes(UART_PORT, stats_msg, strlen(stats_msg));
         }
 
-        last_request = current_request;
+        // Falling edge of REQUEST — clear GRANT
+        if (!request && last_request && grant_active) {
+            gpio_set_level(GRANT_GPIO, 0);
+            gpio_set_level(SWITCH_GRANT_GPIO, 0);
+            grant_active = 0;
+        }
 
-        ets_delay_us(5);  // Small delay for edge detection stability
+        // Save current REQUEST state
+        last_request = request;
+
+        // Send updated stats periodically
+        static uint32_t last_print = 0;
+        if (esp_log_timestamp() - last_print > 1000) {  // every 1 sec
+            char stats_msg[64];
+            snprintf(stats_msg, sizeof(stats_msg), "STATS,%" PRIu32 ",%" PRIu32 "\n", request_count, grant_count);
+            uart_write_bytes(UART_PORT, stats_msg, strlen(stats_msg));
+            last_print = esp_log_timestamp();
+        }
+
+        ets_delay_us(10);  // low-latency loop
     }
 }
