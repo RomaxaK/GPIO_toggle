@@ -6,7 +6,7 @@ SERIAL_PORT = 'COM9'
 BAUD_RATE = 115200
 
 class SerialReader(threading.Thread):
-    def __init__(self, callback=None, port=SERIAL_PORT, baud=BAUD_RATE):
+    def __init__(self, callback, port=SERIAL_PORT, baud=BAUD_RATE):
         super().__init__(daemon=True)
         self.callback = callback
         self.ser = serial.Serial(port, baud, timeout=1)
@@ -15,16 +15,13 @@ class SerialReader(threading.Thread):
         while True:
             try:
                 line = self.ser.readline().decode(errors='ignore').strip()
-                if line.startswith("STATS") and self.callback:
+                if line.startswith("STATS"):
                     parts = line.split(',')
                     if len(parts) == 3:
-                        try:
-                            _, req, grant = parts
-                            self.callback(int(req.strip()), int(grant.strip()), line)
-                        except:
-                            pass
+                        _, req, grant = parts
+                        self.callback(int(req.strip()), int(grant.strip()))
             except Exception as e:
-                print(f"Serial error: {e}")
+                print(f"Serial read error: {e}")
 
     def send_command_async(self, cmd: str):
         def send():
@@ -35,25 +32,45 @@ class SerialReader(threading.Thread):
                 print(f"Write error: {e}")
         threading.Thread(target=send, daemon=True).start()
 
-class SimpleGrantGUI:
+class GrantGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Grant Mode Control")
+        self.root.title("Grant Control")
 
-        self.reader = SerialReader()
+        self.request_count = 0
+        self.grant_count = 0
+
+        self.reader = SerialReader(self.update_counters)
         self.reader.start()
 
-        self.create_widgets()
+        self.build_ui()
 
-    def create_widgets(self):
-        tk.Button(self.root, text="Always Grant", width=25,
-                  command=lambda: self.reader.send_command_async("CMD,GRANT_MODE,ALWAYS")).pack(pady=10)
-        tk.Button(self.root, text="No Grant", width=25,
-                  command=lambda: self.reader.send_command_async("CMD,GRANT_MODE,NONE")).pack(pady=10)
-        tk.Button(self.root, text="Random Grant", width=25,
-                  command=lambda: self.reader.send_command_async("CMD,GRANT_MODE,RANDOM")).pack(pady=10)
+    def build_ui(self):
+        self.req_label = tk.Label(self.root, text="Requests: 0", font=("Arial", 16))
+        self.req_label.pack(pady=5)
+
+        self.grant_label = tk.Label(self.root, text="Grants: 0", font=("Arial", 16))
+        self.grant_label.pack(pady=5)
+
+        btn_frame = tk.Frame(self.root)
+        btn_frame.pack(pady=10)
+
+        tk.Button(btn_frame, text="Always Grant", width=20,
+                  command=lambda: self.reader.send_command_async("CMD,GRANT_MODE,ALWAYS")).pack(pady=5)
+
+        tk.Button(btn_frame, text="No Grant", width=20,
+                  command=lambda: self.reader.send_command_async("CMD,GRANT_MODE,NONE")).pack(pady=5)
+
+        tk.Button(btn_frame, text="Random Grant", width=20,
+                  command=lambda: self.reader.send_command_async("CMD,GRANT_MODE,RANDOM")).pack(pady=5)
+
+    def update_counters(self, req, grant):
+        self.request_count = req
+        self.grant_count = grant
+        self.req_label.config(text=f"Requests: {req}")
+        self.grant_label.config(text=f"Grants: {grant}")
 
 if __name__ == "__main__":
     root = tk.Tk()
-    app = SimpleGrantGUI(root)
+    app = GrantGUI(root)
     root.mainloop()
