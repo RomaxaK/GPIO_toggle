@@ -2,7 +2,7 @@ import tkinter as tk
 import serial
 import threading
 
-SERIAL_PORT = 'COM8'  # Change to match your UART port
+SERIAL_PORT = 'COM9'
 BAUD_RATE = 115200
 
 class SerialReader(threading.Thread):
