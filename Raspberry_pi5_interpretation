@@ -1,25 +1,28 @@
 import tkinter as tk
+import serial
 import threading
 import subprocess
 import re
-import serial
 from collections import deque
+import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from matplotlib.figure import Figure
 from matplotlib.animation import FuncAnimation
 
-# Configurations
-SERIAL_PORT = "COM9"
+# ====== Serial Configuration ======
+SERIAL_PORT = 'COM9'
 BAUD_RATE = 115200
-IPERF3_PATH = r"C:\Users\rk52524\Downloads\iperf3.12_64\iperf3.exe"
+
+# ====== iPerf3 Configuration ======
+IPERF3_PATH = "C:\\Users\\rk52524\\Downloads\\iperf3.12_64\\iperf3.exe"
 IPERF3_SERVER = "192.168.1.4"
 IPERF3_PORT = "5202"
 
-# Data buffers
+# ====== Data Buffers ======
 bandwidths = deque(maxlen=100)
 time_points = deque(maxlen=100)
 time_counter = 0
 
+# ====== Serial Communication Thread ======
 class SerialReader(threading.Thread):
     def __init__(self, callback):
         super().__init__(daemon=True)
@@ -33,88 +36,98 @@ class SerialReader(threading.Thread):
                 if line.startswith("STATS"):
                     parts = line.split(',')
                     if len(parts) == 3:
-                        _, req, grant = parts
-                        self.callback(int(req.strip()), int(grant.strip()))
+                        try:
+                            _, req, grant = parts
+                            self.callback(int(req.strip()), int(grant.strip()))
+                        except:
+                            pass
             except Exception as e:
-                print(f"[Serial Error] {e}")
+                print(f"Serial error: {e}")
 
-    def send_command(self, cmd):
+    def send_command(self, cmd: str):
         try:
             print(f"[UART SEND] {cmd}")
             self.ser.write((cmd + '\n').encode())
         except Exception as e:
-            print(f"[UART Write Error] {e}")
+            print(f"Write error: {e}")
 
-class IperfMonitor:
-    def __init__(self, parent_frame):
-        self.fig = Figure(figsize=(5, 3))
-        self.ax = self.fig.add_subplot(111)
-        self.canvas = FigureCanvasTkAgg(self.fig, master=parent_frame)
+# ====== Bandwidth Plot Component ======
+class BandwidthPlot:
+    def __init__(self, parent):
+        self.fig, self.ax = plt.subplots(figsize=(5, 3))
+        self.canvas = FigureCanvasTkAgg(self.fig, master=parent)
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         self.ani = FuncAnimation(self.fig, self.update_plot, interval=1000)
-        threading.Thread(target=self.run_iperf3, daemon=True).start()
+        self.start_iperf()
 
-    def update_plot(self, _):
+    def update_plot(self, frame):
         self.ax.clear()
+        self.ax.plot(time_points, bandwidths, label="Bandwidth (Mbit/s)")
         self.ax.set_title("iPerf3 Bandwidth")
         self.ax.set_xlabel("Time (s)")
         self.ax.set_ylabel("Mbit/s")
         self.ax.grid(True)
-        if bandwidths:
-            self.ax.plot(time_points, bandwidths, label="Bandwidth (Mbit/s)")
-            self.ax.legend()
+        self.ax.legend()
 
-    def run_iperf3(self):
-        global time_counter
-        cmd = [IPERF3_PATH, "-c", IPERF3_SERVER, "-p", IPERF3_PORT, "-i", "1", "-t", "9999"]
-        try:
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-            for line in process.stdout:
-                match = re.search(r"\[\s*\d+\]\s+\d+\.\d+-\d+\.\d+\s+sec\s+\S+\s+\S+\s+(\d+\.\d+)\s+Mbits/sec", line)
-                if match:
-                    bandwidth = float(match.group(1))
-                    bandwidths.append(bandwidth)
-                    time_points.append(time_counter)
-                    time_counter += 1
-        except Exception as e:
-            print(f"[iPerf3 Error] {e}")
+    def start_iperf(self):
+        def run():
+            global time_counter
+            cmd = [IPERF3_PATH, "-c", IPERF3_SERVER, "-p", IPERF3_PORT, "-i", "1", "-t", "9999"]
+            try:
+                process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                for line in process.stdout:
+                    line = line.strip()
+                    print(f"[iperf3 stdout] {line}")
+                    match = re.search(r'\[\s*\d+\]\s+\d+\.\d+-\d+\.\d+\s+sec\s+\S+\s+\S+\s+(\d+\.\d+)\s+Mbits/sec', line)
+                    if match:
+                        bw = float(match.group(1))
+                        bandwidths.append(bw)
+                        time_points.append(time_counter)
+                        time_counter += 1
+            except Exception as e:
+                print(f"[iperf3 error] {e}")
+        threading.Thread(target=run, daemon=True).start()
 
-class App:
+# ====== GUI Application ======
+class ESP32IperfGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("ESP32 + iPerf3 Monitor")
+        self.reader = SerialReader(self.update_stats)
+        self.reader.start()
 
-        self.serial = SerialReader(self.update_stats)
-        self.serial.start()
+        self.last_req = -1
+        self.last_grant = -1
 
-        self.setup_gui()
+        self.build_gui()
 
-    def setup_gui(self):
+    def build_gui(self):
         left = tk.Frame(self.root)
         left.pack(side=tk.LEFT, padx=10, pady=10)
 
-        tk.Button(left, text="Always Grant", width=20,
-                  command=lambda: self.serial.send_command("CMD,GRANT_MODE,ALWAYS")).pack(pady=5)
-        tk.Button(left, text="No Grant", width=20,
-                  command=lambda: self.serial.send_command("CMD,GRANT_MODE,NONE")).pack(pady=5)
-        tk.Button(left, text="Random Grant", width=20,
-                  command=lambda: self.serial.send_command("CMD,GRANT_MODE,RANDOM")).pack(pady=5)
+        tk.Button(left, text="Always Grant", command=lambda: self.reader.send_command("CMD,GRANT_MODE,ALWAYS")).pack(pady=5)
+        tk.Button(left, text="No Grant", command=lambda: self.reader.send_command("CMD,GRANT_MODE,NONE")).pack(pady=5)
+        tk.Button(left, text="Random Grant", command=lambda: self.reader.send_command("CMD,GRANT_MODE,RANDOM")).pack(pady=5)
 
-        self.req_label = tk.Label(left, text="Requests: 0", font=("Arial", 14))
-        self.req_label.pack(pady=5)
-        self.grant_label = tk.Label(left, text="Grants: 0", font=("Arial", 14))
-        self.grant_label.pack(pady=5)
+        self.req_label = tk.Label(left, text="Requests: 0", font=("Arial", 12))
+        self.req_label.pack(pady=10)
+        self.grant_label = tk.Label(left, text="Grants: 0", font=("Arial", 12))
+        self.grant_label.pack(pady=10)
 
         right = tk.Frame(self.root)
         right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
-
-        self.plot = IperfMonitor(right)
+        self.plot = BandwidthPlot(right)
 
     def update_stats(self, req, grant):
-        self.req_label.config(text=f"Requests: {req}")
-        self.grant_label.config(text=f"Grants: {grant}")
+        if req != self.last_req:
+            self.req_label.config(text=f"Requests: {req}")
+            self.last_req = req
+        if grant != self.last_grant:
+            self.grant_label.config(text=f"Grants: {grant}")
+            self.last_grant = grant
 
+# ====== Entry Point ======
 if __name__ == "__main__":
     root = tk.Tk()
-    app = App(root)
+    app = ESP32IperfGUI(root)
     root.mainloop()
