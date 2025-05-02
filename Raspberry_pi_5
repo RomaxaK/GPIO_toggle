@@ -1,53 +1,18 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <lgpio.h>
-
-#define REQUEST_GPIO 17  // GPIO for request signal
-#define GRANT_GPIO 27    // GPIO for grant signal
-#define DELAY_US 1       // Minimal delay in microseconds
-
-int main() {
-    int chip, err;
-
-    // Open GPIO chip 0
-    chip = lgpio_open(0);
-    if (chip < 0) {
-        perror("Failed to open GPIO chip");
-        return 1;
-    }
-
-    // Set GPIOs as output
-    err = lgpio_claim_line(chip, REQUEST_GPIO, 0, LGPIO_OUTPUT, 0);
-    if (err < 0) {
-        perror("Failed to set REQUEST GPIO direction");
-        return 1;
-    }
-    err = lgpio_claim_line(chip, GRANT_GPIO, 0, LGPIO_OUTPUT, 0);
-    if (err < 0) {
-        perror("Failed to set GRANT GPIO direction");
-        return 1;
-    }
-
-    printf("Starting Request-Grant signal test...\n");
-
-    while (1) {
-        // Set request GPIO HIGH
-        lgpio_set_line(chip, REQUEST_GPIO, 1);
-        usleep(DELAY_US);
-
-        // Set grant GPIO HIGH
-        lgpio_set_line(chip, GRANT_GPIO, 1);
-        usleep(DELAY_US);
-
-        // Set both GPIOs LOW
-        lgpio_set_line(chip, REQUEST_GPIO, 0);
-        lgpio_set_line(chip, GRANT_GPIO, 0);
-
-        printf("Request sent, Grant given\n");
-        usleep(100000); // 100ms delay
-    }
-
-    lgpio_close(chip);
-    return 0;
-}
+C:\Users\rk52524\PycharmProjects\data_real-time\.venv\Scripts\python.exe C:\Users\rk52524\AppData\Roaming\JetBrains\PyCharmCE2023.3\scratches\scratch.py 
+C:\Users\rk52524\AppData\Roaming\JetBrains\PyCharmCE2023.3\scratches\scratch.py:54: UserWarning: frames=None which we can infer the length of, did not pass an explicit *save_count* and passed cache_frame_data=True.  To avoid a possibly unbounded cache, frame data caching has been disabled. To suppress this warning either pass `cache_frame_data=False` or `save_count=MAX_FRAMES`.
+  self.ani = FuncAnimation(self.fig, self.update_plot, interval=1000)
+Exception in thread Thread-2 (target):
+Traceback (most recent call last):
+  File "C:\Users\rk52524\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1052, in _bootstrap_inner
+    self.run()
+  File "C:\Users\rk52524\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 989, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\rk52524\AppData\Roaming\JetBrains\PyCharmCE2023.3\scratches\scratch.py", line 62, in target
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\rk52524\AppData\Local\Programs\Python\Python312\Lib\subprocess.py", line 1026, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "C:\Users\rk52524\AppData\Local\Programs\Python\Python312\Lib\subprocess.py", line 1538, in _execute_child
+    hp, ht, pid, tid = _winapi.CreateProcess(executable, args,
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [WinError 2] The system cannot find the file specified
