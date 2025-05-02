@@ -8,17 +8,19 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.animation import FuncAnimation
 
-# Configuration
-SERIAL_PORT = 'COM9'  # Set to your USB-to-UART port
+# === CONFIGURATION ===
+SERIAL_PORT = 'COM9'
 BAUD_RATE = 115200
-IPERF_SERVER = '192.168.1.4'  # Replace with your Raspberry Pi IP
-IPERF_DURATION = 0  # 0 means run continuously
+IPERF_PATH = 'C:\\Users\\rk52524\\Downloads\\iperf3.12_64\\iperf3.exe'
+IPERF_SERVER = '192.168.1.4'
+IPERF_PORT = 5202
 
+# === SERIAL THREAD ===
 class SerialReader(threading.Thread):
-    def __init__(self, callback, port=SERIAL_PORT, baud=BAUD_RATE):
+    def __init__(self, callback):
         super().__init__(daemon=True)
         self.callback = callback
-        self.ser = serial.Serial(port, baud, timeout=1)
+        self.ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
 
     def run(self):
         while True:
@@ -28,98 +30,96 @@ class SerialReader(threading.Thread):
                     parts = line.split(',')
                     if len(parts) == 3:
                         _, req, grant = parts
-                        self.callback(int(req.strip()), int(grant.strip()))
+                        self.callback(int(req), int(grant))
             except Exception as e:
-                print(f"Serial error: {e}")
+                print("Serial error:", e)
 
-    def send_command_async(self, cmd: str):
-        def send():
-            try:
-                print(f"Sending: {cmd}")
-                self.ser.write((cmd + '\n').encode())
-            except Exception as e:
-                print(f"Write error: {e}")
-        threading.Thread(target=send, daemon=True).start()
+    def send_command(self, command):
+        try:
+            print("Sending:", command)
+            self.ser.write((command + '\n').encode())
+        except Exception as e:
+            print("Send error:", e)
 
-class IperfPlotter:
-    def __init__(self, frame):
-        self.times = []
-        self.bandwidths = []
-        self.time_index = 0
-
-        self.fig, self.ax = plt.subplots(figsize=(5, 3))
-        self.canvas = FigureCanvasTkAgg(self.fig, master=frame)
-        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-        self.ani = FuncAnimation(self.fig, self.update_plot, interval=1000)
-        self.run_iperf()
-
-    def run_iperf(self):
-        def target():
-            cmd = ["iperf3", "-c", IPERF_SERVER, "-i", "1"]
-            if IPERF_DURATION > 0:
-                cmd += ["-t", str(IPERF_DURATION)]
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-            for line in process.stdout:
-                match = re.search(r'\[\s*\d+\]\s+\d+\.\d+-\d+\.\d+\s+sec\s+\S+\s+\S+\s+(\d+\.\d+)\s+Mbits/sec', line)
-                if match:
-                    bandwidth = float(match.group(1))
-                    self.times.append(self.time_index)
-                    self.bandwidths.append(bandwidth)
-                    self.time_index += 1
-        threading.Thread(target=target, daemon=True).start()
-
-    def update_plot(self, i):
-        self.ax.clear()
-        self.ax.plot(self.times, self.bandwidths, marker='o')
-        self.ax.set_xlabel('Time (s)')
-        self.ax.set_ylabel('Throughput (Mbits/sec)')
-        self.ax.set_title('iPerf3 Live Throughput')
-        self.ax.grid(True)
-        self.canvas.draw()
-
-class StatsGUI:
+# === GUI ===
+class GUIApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("ESP32 Grant Control + iPerf3 Plot")
+        self.root.title("ESP32 Grant GUI + iperf3 Monitor")
 
         self.reader = SerialReader(self.update_stats)
         self.reader.start()
 
-        # Left control panel
-        left_frame = tk.Frame(root)
-        left_frame.pack(side=tk.LEFT, padx=10, pady=10)
+        self.req_count = 0
+        self.grant_count = 0
 
-        self.req_label = tk.Label(left_frame, text="Requests: 0", font=("Arial", 16))
+        self.bandwidth = []
+        self.time_points = []
+
+        self.setup_widgets()
+        self.start_iperf_thread()
+        self.setup_plot()
+
+    def setup_widgets(self):
+        top = tk.Frame(self.root)
+        top.pack(side=tk.LEFT, padx=10, pady=10)
+
+        self.req_label = tk.Label(top, text="Requests: 0", font=("Arial", 14))
         self.req_label.pack(pady=5)
 
-        self.grant_label = tk.Label(left_frame, text="Grants: 0", font=("Arial", 16))
+        self.grant_label = tk.Label(top, text="Grants: 0", font=("Arial", 14))
         self.grant_label.pack(pady=5)
 
-        tk.Button(left_frame, text="Always Grant",
-                  command=lambda: self.reader.send_command_async("CMD,GRANT_MODE,ALWAYS")).pack(fill='x', pady=5)
-        tk.Button(left_frame, text="No Grant",
-                  command=lambda: self.reader.send_command_async("CMD,GRANT_MODE,NONE")).pack(fill='x', pady=5)
-        tk.Button(left_frame, text="Random Grant",
-                  command=lambda: self.reader.send_command_async("CMD,GRANT_MODE,RANDOM")).pack(fill='x', pady=5)
+        tk.Button(top, text="Always Grant", command=lambda: self.set_grant_mode("ALWAYS")).pack(pady=2)
+        tk.Button(top, text="No Grant", command=lambda: self.set_grant_mode("NONE")).pack(pady=2)
+        tk.Button(top, text="Random Grant", command=lambda: self.set_grant_mode("RANDOM")).pack(pady=2)
 
-        # Right plot panel
-        right_frame = tk.Frame(root)
-        right_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.plotter = IperfPlotter(right_frame)
-
-        self.last_req = -1
-        self.last_grant = -1
+    def set_grant_mode(self, mode):
+        self.reader.send_command(f"CMD,GRANT_MODE,{mode}")
 
     def update_stats(self, req, grant):
-        if req != self.last_req:
-            self.req_label.config(text=f"Requests: {req}")
-            self.last_req = req
-        if grant != self.last_grant:
-            self.grant_label.config(text=f"Grants: {grant}")
-            self.last_grant = grant
+        self.req_count = req
+        self.grant_count = grant
+        self.req_label.config(text=f"Requests: {req}")
+        self.grant_label.config(text=f"Grants: {grant}")
 
+    def start_iperf_thread(self):
+        def target():
+            cmd = [IPERF_PATH, '-c', IPERF_SERVER, '-p', str(IPERF_PORT), '-i', '1', '-t', '9999']
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            for line in process.stdout:
+                rate = self.extract_bandwidth(line)
+                if rate is not None:
+                    self.bandwidth.append(rate)
+                    self.time_points.append(len(self.time_points))
+
+        threading.Thread(target=target, daemon=True).start()
+
+    def extract_bandwidth(self, line):
+        match = re.search(r'\s+(\d+\.\d+)\s+Mbits/sec', line)
+        if match:
+            return float(match.group(1))
+        return None
+
+    def setup_plot(self):
+        self.fig, self.ax = plt.subplots(figsize=(5, 3))
+        self.ax.set_title("iperf3 Bandwidth (Mbit/s)")
+        self.ax.set_xlabel("Time (s)")
+        self.ax.set_ylabel("Throughput")
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.root)
+        self.canvas.get_tk_widget().pack(side=tk.RIGHT, padx=10)
+        self.ani = FuncAnimation(self.fig, self.update_plot, interval=1000)
+
+    def update_plot(self, frame):
+        self.ax.clear()
+        self.ax.set_title("iperf3 Bandwidth (Mbit/s)")
+        self.ax.set_xlabel("Time (s)")
+        self.ax.set_ylabel("Throughput")
+        self.ax.plot(self.time_points, self.bandwidth, color='blue')
+        self.ax.grid(True)
+
+# === MAIN ===
 if __name__ == "__main__":
     root = tk.Tk()
-    app = StatsGUI(root)
+    app = GUIApp(root)
     root.mainloop()
