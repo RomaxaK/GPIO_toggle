@@ -1,62 +1,83 @@
-import subprocess
-import matplotlib.pyplot as plt
-import matplotlib.animation as animation
-import re
+import tkinter as tk
+from tkinter import ttk
 import threading
+import subprocess
+import re
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.animation import FuncAnimation
+from collections import deque
 
-class Iperf3Monitor:
-    def __init__(self):
-        self.times = []
-        self.bandwidths = []
-        self.time_counter = 0
+# Configuration
+IPERF3_PATH = "C:\\Users\\rk52524\\Downloads\\iperf3.12_64\\iperf3.exe"
+IPERF3_SERVER = "192.168.1.4"
+IPERF3_PORT = "5202"
 
-        self.fig, self.ax = plt.subplots()
-        self.ani = animation.FuncAnimation(self.fig, self.update_plot, interval=1000)
+# Buffers for bandwidth data
+time_points = deque(maxlen=100)
+bandwidths = deque(maxlen=100)
+time_counter = 0
 
-        # Start iperf3 in background
-        threading.Thread(target=self.run_iperf3, daemon=True).start()
+class IperfPlotter:
+    def __init__(self, parent_frame):
+        self.fig, self.ax = plt.subplots(figsize=(5, 3))
+        self.canvas = FigureCanvasTkAgg(self.fig, master=parent_frame)
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        self.ani = FuncAnimation(self.fig, self.update_plot, interval=1000)
+        self.run_iperf3()
 
-        plt.show()
+    def update_plot(self, frame):
+        self.ax.clear()
+        self.ax.plot(time_points, bandwidths, label="Bandwidth (Mbit/s)")
+        self.ax.set_title("iPerf3 Bandwidth")
+        self.ax.set_xlabel("Time (s)")
+        self.ax.set_ylabel("Mbit/s")
+        self.ax.grid(True)
+        self.ax.legend()
 
     def run_iperf3(self):
-        cmd = [
-            r"C:\Users\rk52524\Downloads\iperf3.12_64\iperf3.exe",
-            "-c", "192.168.1.4",
-            "-p", "5202",
-            "-i", "1",
-            "-t", "9999"
-        ]
-        try:
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True
-            )
-            print("[iPerf3] Subprocess started")
-
-            for line in iter(process.stdout.readline, ''):
-                print(f"[iPerf3 stdout] {line.strip()}")
-                match = re.search(r'\s+(\d+\.\d+)\s+Mbits/sec', line)
+        def target():
+            global time_counter
+            cmd = [IPERF3_PATH, "-c", IPERF3_SERVER, "-p", IPERF3_PORT, "-i", "1", "-t", "9999"]
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            for line in process.stdout:
+                print(f"[iperf3 stdout] {line.strip()}")
+                match = re.search(r'\d+\.\d+\s+sec\s+\S+\s+\S+\s+(\d+\.\d+)\s+Mbits/sec', line)
                 if match:
-                    bw = float(match.group(1))
-                    self.time_counter += 1
-                    self.bandwidths.append(bw)
-                    self.times.append(self.time_counter)
+                    bandwidth = float(match.group(1))
+                    bandwidths.append(bandwidth)
+                    time_points.append(time_counter)
+                    time_counter += 1
+        threading.Thread(target=target, daemon=True).start()
 
-        except FileNotFoundError:
-            print("iperf3 executable not found. Check the path.")
-        except Exception as e:
-            print(f"Error running iperf3: {e}")
+class App:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("ESP32 + iPerf3 Monitor")
+        self.create_widgets()
 
-    def update_plot(self, _):
-        self.ax.clear()
-        self.ax.plot(self.times, self.bandwidths, label="Throughput")
-        self.ax.set_title("iPerf3 Bandwidth (Mbits/sec)")
-        self.ax.set_xlabel("Time (s)")
-        self.ax.set_ylabel("Bandwidth (Mbits/sec)")
-        self.ax.legend()
-        self.ax.grid(True)
+    def create_widgets(self):
+        left_frame = tk.Frame(self.root)
+        left_frame.pack(side=tk.LEFT, padx=10, pady=10)
+
+        tk.Button(left_frame, text="Always Grant", command=lambda: self.send_command("CMD,GRANT_MODE,ALWAYS")).pack(pady=5)
+        tk.Button(left_frame, text="No Grant", command=lambda: self.send_command("CMD,GRANT_MODE,NONE")).pack(pady=5)
+        tk.Button(left_frame, text="Random Grant", command=lambda: self.send_command("CMD,GRANT_MODE,RANDOM")).pack(pady=5)
+
+        self.req_label = tk.Label(left_frame, text="Requests: 0")
+        self.req_label.pack(pady=5)
+        self.grant_label = tk.Label(left_frame, text="Grants: 0")
+        self.grant_label.pack(pady=5)
+
+        right_frame = tk.Frame(self.root)
+        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        self.plotter = IperfPlotter(right_frame)
+
+    def send_command(self, cmd):
+        print(f"[SIMULATED UART] {cmd}")
+        # Integrate with your SerialReader to send real commands
 
 if __name__ == "__main__":
-    Iperf3Monitor()
+    root = tk.Tk()
+    app = App(root)
+    root.mainloop()
