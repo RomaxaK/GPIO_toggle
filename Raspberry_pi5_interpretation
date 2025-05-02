@@ -1,81 +1,118 @@
 import tkinter as tk
-from tkinter import ttk
 import threading
 import subprocess
 import re
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from matplotlib.animation import FuncAnimation
+import serial
 from collections import deque
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
+from matplotlib.animation import FuncAnimation
 
-# Configuration
-IPERF3_PATH = "C:\\Users\\rk52524\\Downloads\\iperf3.12_64\\iperf3.exe"
+# Configurations
+SERIAL_PORT = "COM9"
+BAUD_RATE = 115200
+IPERF3_PATH = r"C:\Users\rk52524\Downloads\iperf3.12_64\iperf3.exe"
 IPERF3_SERVER = "192.168.1.4"
 IPERF3_PORT = "5202"
 
-# Buffers for bandwidth data
-time_points = deque(maxlen=100)
+# Data buffers
 bandwidths = deque(maxlen=100)
+time_points = deque(maxlen=100)
 time_counter = 0
 
-class IperfPlotter:
+class SerialReader(threading.Thread):
+    def __init__(self, callback):
+        super().__init__(daemon=True)
+        self.callback = callback
+        self.ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
+
+    def run(self):
+        while True:
+            try:
+                line = self.ser.readline().decode(errors='ignore').strip()
+                if line.startswith("STATS"):
+                    parts = line.split(',')
+                    if len(parts) == 3:
+                        _, req, grant = parts
+                        self.callback(int(req.strip()), int(grant.strip()))
+            except Exception as e:
+                print(f"[Serial Error] {e}")
+
+    def send_command(self, cmd):
+        try:
+            print(f"[UART SEND] {cmd}")
+            self.ser.write((cmd + '\n').encode())
+        except Exception as e:
+            print(f"[UART Write Error] {e}")
+
+class IperfMonitor:
     def __init__(self, parent_frame):
-        self.fig, self.ax = plt.subplots(figsize=(5, 3))
+        self.fig = Figure(figsize=(5, 3))
+        self.ax = self.fig.add_subplot(111)
         self.canvas = FigureCanvasTkAgg(self.fig, master=parent_frame)
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         self.ani = FuncAnimation(self.fig, self.update_plot, interval=1000)
-        self.run_iperf3()
+        threading.Thread(target=self.run_iperf3, daemon=True).start()
 
-    def update_plot(self, frame):
+    def update_plot(self, _):
         self.ax.clear()
-        self.ax.plot(time_points, bandwidths, label="Bandwidth (Mbit/s)")
         self.ax.set_title("iPerf3 Bandwidth")
         self.ax.set_xlabel("Time (s)")
         self.ax.set_ylabel("Mbit/s")
         self.ax.grid(True)
-        self.ax.legend()
+        if bandwidths:
+            self.ax.plot(time_points, bandwidths, label="Bandwidth (Mbit/s)")
+            self.ax.legend()
 
     def run_iperf3(self):
-        def target():
-            global time_counter
-            cmd = [IPERF3_PATH, "-c", IPERF3_SERVER, "-p", IPERF3_PORT, "-i", "1", "-t", "9999"]
+        global time_counter
+        cmd = [IPERF3_PATH, "-c", IPERF3_SERVER, "-p", IPERF3_PORT, "-i", "1", "-t", "9999"]
+        try:
             process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             for line in process.stdout:
-                print(f"[iperf3 stdout] {line.strip()}")
-                match = re.search(r'\d+\.\d+\s+sec\s+\S+\s+\S+\s+(\d+\.\d+)\s+Mbits/sec', line)
+                match = re.search(r"\[\s*\d+\]\s+\d+\.\d+-\d+\.\d+\s+sec\s+\S+\s+\S+\s+(\d+\.\d+)\s+Mbits/sec", line)
                 if match:
                     bandwidth = float(match.group(1))
                     bandwidths.append(bandwidth)
                     time_points.append(time_counter)
                     time_counter += 1
-        threading.Thread(target=target, daemon=True).start()
+        except Exception as e:
+            print(f"[iPerf3 Error] {e}")
 
 class App:
     def __init__(self, root):
         self.root = root
         self.root.title("ESP32 + iPerf3 Monitor")
-        self.create_widgets()
 
-    def create_widgets(self):
-        left_frame = tk.Frame(self.root)
-        left_frame.pack(side=tk.LEFT, padx=10, pady=10)
+        self.serial = SerialReader(self.update_stats)
+        self.serial.start()
 
-        tk.Button(left_frame, text="Always Grant", command=lambda: self.send_command("CMD,GRANT_MODE,ALWAYS")).pack(pady=5)
-        tk.Button(left_frame, text="No Grant", command=lambda: self.send_command("CMD,GRANT_MODE,NONE")).pack(pady=5)
-        tk.Button(left_frame, text="Random Grant", command=lambda: self.send_command("CMD,GRANT_MODE,RANDOM")).pack(pady=5)
+        self.setup_gui()
 
-        self.req_label = tk.Label(left_frame, text="Requests: 0")
+    def setup_gui(self):
+        left = tk.Frame(self.root)
+        left.pack(side=tk.LEFT, padx=10, pady=10)
+
+        tk.Button(left, text="Always Grant", width=20,
+                  command=lambda: self.serial.send_command("CMD,GRANT_MODE,ALWAYS")).pack(pady=5)
+        tk.Button(left, text="No Grant", width=20,
+                  command=lambda: self.serial.send_command("CMD,GRANT_MODE,NONE")).pack(pady=5)
+        tk.Button(left, text="Random Grant", width=20,
+                  command=lambda: self.serial.send_command("CMD,GRANT_MODE,RANDOM")).pack(pady=5)
+
+        self.req_label = tk.Label(left, text="Requests: 0", font=("Arial", 14))
         self.req_label.pack(pady=5)
-        self.grant_label = tk.Label(left_frame, text="Grants: 0")
+        self.grant_label = tk.Label(left, text="Grants: 0", font=("Arial", 14))
         self.grant_label.pack(pady=5)
 
-        right_frame = tk.Frame(self.root)
-        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
-        self.plotter = IperfPlotter(right_frame)
+        right = tk.Frame(self.root)
+        right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-    def send_command(self, cmd):
-        print(f"[SIMULATED UART] {cmd}")
-        # Integrate with your SerialReader to send real commands
+        self.plot = IperfMonitor(right)
+
+    def update_stats(self, req, grant):
+        self.req_label.config(text=f"Requests: {req}")
+        self.grant_label.config(text=f"Grants: {grant}")
 
 if __name__ == "__main__":
     root = tk.Tk()
