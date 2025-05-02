@@ -1,76 +1,62 @@
-import tkinter as tk
-import serial
+import subprocess
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+import re
 import threading
 
-SERIAL_PORT = 'COM9'
-BAUD_RATE = 115200
+class Iperf3Monitor:
+    def __init__(self):
+        self.times = []
+        self.bandwidths = []
+        self.time_counter = 0
 
-class SerialReader(threading.Thread):
-    def __init__(self, callback, port=SERIAL_PORT, baud=BAUD_RATE):
-        super().__init__(daemon=True)
-        self.callback = callback
-        self.ser = serial.Serial(port, baud, timeout=1)
+        self.fig, self.ax = plt.subplots()
+        self.ani = animation.FuncAnimation(self.fig, self.update_plot, interval=1000)
 
-    def run(self):
-        while True:
-            try:
-                line = self.ser.readline().decode(errors='ignore').strip()
-                if line.startswith("STATS"):
-                    parts = line.split(',')
-                    if len(parts) == 3:
-                        _, req, grant = parts
-                        self.callback(int(req.strip()), int(grant.strip()))
-            except Exception as e:
-                print(f"Serial read error: {e}")
+        # Start iperf3 in background
+        threading.Thread(target=self.run_iperf3, daemon=True).start()
 
-    def send_command_async(self, cmd: str):
-        def send():
-            try:
-                print(f"Sending: {cmd}")
-                self.ser.write((cmd + '\n').encode())
-            except Exception as e:
-                print(f"Write error: {e}")
-        threading.Thread(target=send, daemon=True).start()
+        plt.show()
 
-class GrantGUI:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Grant Control")
+    def run_iperf3(self):
+        cmd = [
+            r"C:\Users\rk52524\Downloads\iperf3.12_64\iperf3.exe",
+            "-c", "192.168.1.4",
+            "-p", "5202",
+            "-i", "1",
+            "-t", "9999"
+        ]
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True
+            )
+            print("[iPerf3] Subprocess started")
 
-        self.request_count = 0
-        self.grant_count = 0
+            for line in iter(process.stdout.readline, ''):
+                print(f"[iPerf3 stdout] {line.strip()}")
+                match = re.search(r'\s+(\d+\.\d+)\s+Mbits/sec', line)
+                if match:
+                    bw = float(match.group(1))
+                    self.time_counter += 1
+                    self.bandwidths.append(bw)
+                    self.times.append(self.time_counter)
 
-        self.reader = SerialReader(self.update_counters)
-        self.reader.start()
+        except FileNotFoundError:
+            print("iperf3 executable not found. Check the path.")
+        except Exception as e:
+            print(f"Error running iperf3: {e}")
 
-        self.build_ui()
-
-    def build_ui(self):
-        self.req_label = tk.Label(self.root, text="Requests: 0", font=("Arial", 16))
-        self.req_label.pack(pady=5)
-
-        self.grant_label = tk.Label(self.root, text="Grants: 0", font=("Arial", 16))
-        self.grant_label.pack(pady=5)
-
-        btn_frame = tk.Frame(self.root)
-        btn_frame.pack(pady=10)
-
-        tk.Button(btn_frame, text="Always Grant", width=20,
-                  command=lambda: self.reader.send_command_async("CMD,GRANT_MODE,ALWAYS")).pack(pady=5)
-
-        tk.Button(btn_frame, text="No Grant", width=20,
-                  command=lambda: self.reader.send_command_async("CMD,GRANT_MODE,NONE")).pack(pady=5)
-
-        tk.Button(btn_frame, text="Random Grant", width=20,
-                  command=lambda: self.reader.send_command_async("CMD,GRANT_MODE,RANDOM")).pack(pady=5)
-
-    def update_counters(self, req, grant):
-        self.request_count = req
-        self.grant_count = grant
-        self.req_label.config(text=f"Requests: {req}")
-        self.grant_label.config(text=f"Grants: {grant}")
+    def update_plot(self, _):
+        self.ax.clear()
+        self.ax.plot(self.times, self.bandwidths, label="Throughput")
+        self.ax.set_title("iPerf3 Bandwidth (Mbits/sec)")
+        self.ax.set_xlabel("Time (s)")
+        self.ax.set_ylabel("Bandwidth (Mbits/sec)")
+        self.ax.legend()
+        self.ax.grid(True)
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = GrantGUI(root)
-    root.mainloop()
+    Iperf3Monitor()
