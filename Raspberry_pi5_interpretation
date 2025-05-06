@@ -14,11 +14,6 @@ from matplotlib.animation import FuncAnimation
 SERIAL_PORT = 'COM9'
 BAUD_RATE = 115200
 
-# ====== iPerf3 Configuration ======
-IPERF3_PATH = "C:\\Users\\rk52524\\Downloads\\iperf3.12_64\\iperf3.exe"
-IPERF3_SERVER = "192.168.1.4"
-IPERF3_PORT = "5202"
-
 # ====== Data Buffers ======
 throughputs = deque(maxlen=100)
 time_points = deque(maxlen=100)
@@ -56,7 +51,7 @@ class SerialReader(threading.Thread):
 
 # ====== Throughput Plot Component ======
 class ThroughputPlot:
-    def __init__(self, parent):
+    def __init__(self, parent, config_getter):
         self.fig, self.ax = plt.subplots(figsize=(5, 3))
         self.canvas = FigureCanvasTkAgg(self.fig, master=parent)
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
@@ -65,6 +60,7 @@ class ThroughputPlot:
         self.running = False
         self.log_file = None
         self.log_writer = None
+        self.config_getter = config_getter
 
     def update_plot(self, frame):
         with lock:
@@ -84,6 +80,9 @@ class ThroughputPlot:
             return
         self.running = True
 
+        # Get configuration
+        ip, port, duration, interval = self.config_getter()
+
         log_name = f"iperf3_log_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.csv"
         self.log_file = open(log_name, 'w', newline='')
         self.log_writer = csv.writer(self.log_file)
@@ -91,7 +90,7 @@ class ThroughputPlot:
 
         def run():
             global time_counter
-            cmd = [IPERF3_PATH, "-c", IPERF3_SERVER, "-p", IPERF3_PORT, "-i", "1", "-t", "9999", "--forceflush"]
+            cmd = ["iperf3", "-c", ip, "-p", port, "-i", interval, "-t", duration, "--forceflush"]
             try:
                 print(f"[iperf3 started] {cmd}")
                 self.iperf_process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -129,6 +128,16 @@ class ThroughputPlot:
             self.iperf_process.terminate()
             self.running = False
 
+    def save_log_now(self):
+        log_name = f"manual_export_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.csv"
+        with open(log_name, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(["Time (s)", "Throughput (Mbit/s)"])
+            with lock:
+                for t, th in zip(time_points, throughputs):
+                    writer.writerow([t, th])
+        print(f"[Log saved manually] {log_name}")
+
 # ====== GUI Application ======
 class ESP32IperfGUI:
     def __init__(self, root):
@@ -146,13 +155,38 @@ class ESP32IperfGUI:
         left = tk.Frame(self.root)
         left.pack(side=tk.LEFT, padx=10, pady=10)
 
+        # Control buttons
         tk.Button(left, text="Always Grant", command=lambda: self.reader.send_command("CMD,GRANT_MODE,ALWAYS")).pack(pady=5)
         tk.Button(left, text="No Grant", command=lambda: self.reader.send_command("CMD,GRANT_MODE,NONE")).pack(pady=5)
         tk.Button(left, text="Random Grant", command=lambda: self.reader.send_command("CMD,GRANT_MODE,RANDOM")).pack(pady=5)
 
-        tk.Button(left, text="Start iPerf3", command=self.start_iperf).pack(pady=10)
-        tk.Button(left, text="Stop iPerf3", command=self.stop_iperf).pack(pady=5)
+        # Config fields
+        tk.Label(left, text="Server IP:").pack()
+        self.ip_entry = tk.Entry(left)
+        self.ip_entry.insert(0, "192.168.1.4")
+        self.ip_entry.pack()
 
+        tk.Label(left, text="Port:").pack()
+        self.port_entry = tk.Entry(left)
+        self.port_entry.insert(0, "5202")
+        self.port_entry.pack()
+
+        tk.Label(left, text="Duration (s):").pack()
+        self.duration_entry = tk.Entry(left)
+        self.duration_entry.insert(0, "9999")
+        self.duration_entry.pack()
+
+        tk.Label(left, text="Interval (s):").pack()
+        self.interval_entry = tk.Entry(left)
+        self.interval_entry.insert(0, "1")
+        self.interval_entry.pack()
+
+        # iPerf3 Controls
+        tk.Button(left, text="Start iPerf3", command=self.start_iperf).pack(pady=5)
+        tk.Button(left, text="Stop iPerf3", command=self.stop_iperf).pack(pady=5)
+        tk.Button(left, text="Save Log", command=self.save_log).pack(pady=5)
+
+        # Labels
         self.req_label = tk.Label(left, text="Requests: 0", font=("Arial", 12))
         self.req_label.pack(pady=10)
         self.grant_label = tk.Label(left, text="Grants: 0", font=("Arial", 12))
@@ -160,7 +194,15 @@ class ESP32IperfGUI:
 
         right = tk.Frame(self.root)
         right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
-        self.plot = ThroughputPlot(right)
+        self.plot = ThroughputPlot(right, self.get_config)
+
+    def get_config(self):
+        return (
+            self.ip_entry.get().strip(),
+            self.port_entry.get().strip(),
+            self.duration_entry.get().strip(),
+            self.interval_entry.get().strip()
+        )
 
     def start_iperf(self):
         with lock:
@@ -172,6 +214,9 @@ class ESP32IperfGUI:
 
     def stop_iperf(self):
         self.plot.stop_iperf()
+
+    def save_log(self):
+        self.plot.save_log_now()
 
     def update_stats(self, req, grant):
         if req != self.last_req:
