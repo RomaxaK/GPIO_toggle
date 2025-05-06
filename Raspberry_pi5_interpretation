@@ -3,6 +3,8 @@ import serial
 import threading
 import subprocess
 import re
+import csv
+from datetime import datetime
 from collections import deque
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -18,7 +20,7 @@ IPERF3_SERVER = "192.168.1.4"
 IPERF3_PORT = "5202"
 
 # ====== Data Buffers ======
-bandwidths = deque(maxlen=100)
+throughputs = deque(maxlen=100)
 time_points = deque(maxlen=100)
 time_counter = 0
 lock = threading.Lock()
@@ -52,8 +54,8 @@ class SerialReader(threading.Thread):
         except Exception as e:
             print(f"Write error: {e}")
 
-# ====== Bandwidth Plot Component ======
-class BandwidthPlot:
+# ====== Throughput Plot Component ======
+class ThroughputPlot:
     def __init__(self, parent):
         self.fig, self.ax = plt.subplots(figsize=(5, 3))
         self.canvas = FigureCanvasTkAgg(self.fig, master=parent)
@@ -61,14 +63,16 @@ class BandwidthPlot:
         self.ani = FuncAnimation(self.fig, self.update_plot, interval=1000, blit=False)
         self.iperf_process = None
         self.running = False
+        self.log_file = None
+        self.log_writer = None
 
     def update_plot(self, frame):
         with lock:
-            if not time_points or not bandwidths:
+            if not time_points or not throughputs:
                 return
             self.ax.clear()
-            self.ax.plot(time_points, bandwidths, label="Bandwidth (Mbit/s)")
-            self.ax.set_title("iPerf3 Bandwidth")
+            self.ax.plot(time_points, throughputs, label="Throughput (Mbit/s)")
+            self.ax.set_title("iPerf3 Throughput")
             self.ax.set_xlabel("Time (s)")
             self.ax.set_ylabel("Mbit/s")
             self.ax.grid(True)
@@ -79,6 +83,11 @@ class BandwidthPlot:
             print("[iPerf3] Already running.")
             return
         self.running = True
+
+        log_name = f"iperf3_log_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.csv"
+        self.log_file = open(log_name, 'w', newline='')
+        self.log_writer = csv.writer(self.log_file)
+        self.log_writer.writerow(["Time (s)", "Throughput (Mbit/s)"])
 
         def run():
             global time_counter
@@ -93,17 +102,23 @@ class BandwidthPlot:
                     print(f"[iperf3 stdout] {line}")
                     match = re.search(r'\[\s*\d+\]\s+\d+\.\d+-\d+\.\d+\s+sec\s+\S+\s+\S+\s+(\d+\.\d+|\d+)\s+Mbits/sec', line)
                     if match:
-                        bw = float(match.group(1))
-                        print(f"[bandwidth matched] {bw}")
+                        throughput = float(match.group(1))
+                        print(f"[throughput matched] {throughput}")
                         with lock:
-                            bandwidths.append(bw)
+                            throughputs.append(throughput)
                             time_points.append(time_counter)
                             time_counter += 1
+                        self.log_writer.writerow([time_counter, throughput])
             except Exception as e:
                 print(f"[iperf3 error] {e}")
             finally:
                 self.running = False
-                self.iperf_process = None
+                if self.iperf_process:
+                    self.iperf_process = None
+                if self.log_file:
+                    self.log_file.close()
+                    self.log_file = None
+                    self.log_writer = None
                 print("[iperf3] Process stopped.")
 
         threading.Thread(target=run, daemon=True).start()
@@ -145,11 +160,11 @@ class ESP32IperfGUI:
 
         right = tk.Frame(self.root)
         right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
-        self.plot = BandwidthPlot(right)
+        self.plot = ThroughputPlot(right)
 
     def start_iperf(self):
         with lock:
-            bandwidths.clear()
+            throughputs.clear()
             time_points.clear()
             global time_counter
             time_counter = 0
