@@ -21,6 +21,7 @@ IPERF3_PORT = "5202"
 bandwidths = deque(maxlen=100)
 time_points = deque(maxlen=100)
 time_counter = 0
+lock = threading.Lock()
 
 # ====== Serial Communication Thread ======
 class SerialReader(threading.Thread):
@@ -57,17 +58,18 @@ class BandwidthPlot:
         self.fig, self.ax = plt.subplots(figsize=(5, 3))
         self.canvas = FigureCanvasTkAgg(self.fig, master=parent)
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        self.ani = FuncAnimation(self.fig, self.update_plot, interval=1000)
+        self.ani = FuncAnimation(self.fig, self.update_plot, interval=1000, blit=False)
         self.start_iperf()
 
     def update_plot(self, frame):
-        self.ax.clear()
-        self.ax.plot(time_points, bandwidths, label="Bandwidth (Mbit/s)")
-        self.ax.set_title("iPerf3 Bandwidth")
-        self.ax.set_xlabel("Time (s)")
-        self.ax.set_ylabel("Mbit/s")
-        self.ax.grid(True)
-        self.ax.legend()
+        with lock:
+            self.ax.clear()
+            self.ax.plot(time_points, bandwidths, label="Bandwidth (Mbit/s)")
+            self.ax.set_title("iPerf3 Bandwidth")
+            self.ax.set_xlabel("Time (s)")
+            self.ax.set_ylabel("Mbit/s")
+            self.ax.grid(True)
+            self.ax.legend()
 
     def start_iperf(self):
         def run():
@@ -78,12 +80,14 @@ class BandwidthPlot:
                 for line in process.stdout:
                     line = line.strip()
                     print(f"[iperf3 stdout] {line}")
-                    match = re.search(r'\[\s*\d+\]\s+\d+\.\d+-\d+\.\d+\s+sec\s+\S+\s+\S+\s+(\d+\.\d+)\s+Mbits/sec', line)
+                    # Match both IPv4 and IPv6 formats
+                    match = re.search(r'(\d+\.\d+)\s+Mbits/sec', line)
                     if match:
                         bw = float(match.group(1))
-                        bandwidths.append(bw)
-                        time_points.append(time_counter)
-                        time_counter += 1
+                        with lock:
+                            bandwidths.append(bw)
+                            time_points.append(time_counter)
+                            time_counter += 1
             except Exception as e:
                 print(f"[iperf3 error] {e}")
         threading.Thread(target=run, daemon=True).start()
@@ -131,48 +135,3 @@ if __name__ == "__main__":
     root = tk.Tk()
     app = ESP32IperfGUI(root)
     root.mainloop()
-
-# ===========Working code, which giving real time graph but only reading values from a .txt file and cannot start iperf3 itself=========
-import matplotlib.pyplot as plt
-import matplotlib.animation as animation
-import re
-
-# Function to parse the output and extract bandwidth values
-def parse_bandwidth(line):
-    match = re.search(r'(\d+\.\d+)\s+Mbits/sec', line)
-    if match:
-        return float(match.group(1))
-    return None
-
-# Initialize lists to store time and bandwidth values
-times = []
-bandwidths = []
-last_line_count = 0
-
-# Function to update the graph
-def update_graph(i):
-    global last_line_count
-    with open("C:\\Users\\rk52524\\Desktop\\iperf3_output.txt", 'r') as f:
-        lines = f.readlines()
-        new_lines = lines[last_line_count:]
-        if new_lines:
-            for line in new_lines:
-                line = line.strip()
-                print(line)
-                bandwidth = parse_bandwidth(line)
-                if bandwidth is not None:
-                    times.append(len(times))
-                    bandwidths.append(bandwidth)
-            last_line_count = len(lines)
-            ax.clear()
-            ax.plot(times, bandwidths)
-            ax.set_xlabel('Time (s)')
-            ax.set_ylabel('Throughput (Mbits/sec)')
-            ax.set_title('Live Throughput Graph')
-
-# Set up the plot
-fig, ax = plt.subplots()
-ani = animation.FuncAnimation(fig, update_graph, interval=1000)
-
-# Show the plot
-plt.show()
