@@ -1,24 +1,8 @@
-def start_iperf(self):
-    def run():
-        global time_counter
-        cmd = [IPERF3_PATH, "-c", IPERF3_SERVER, "-p", IPERF3_PORT, "-i", "1", "-t", "9999"]
-        try:
-            print(f"[iperf3 started] {cmd}")
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-
-            for line in iter(process.stdout.readline, ''):
-                line = line.strip()
-                if not line:
-                    continue
-                print(f"[iperf3 stdout] {line}")
-                match = re.search(r'\[\s*\d+\]\s+\d+\.\d+-\d+\.\d+\s+sec\s+\S+\s+\S+\s+(\d+\.\d+)\s+Mbits/sec', line)
-                if match:
-                    bw = float(match.group(1))
-                    print(f"[bandwidth matched] {bw}")
-                    with lock:
-                        bandwidths.append(bw)
-                        time_points.append(time_counter)
-                        time_counter += 1
-        except Exception as e:
-            print(f"[iperf3 error] {e}")
-    threading.Thread(target=run, daemon=True).start()
+match = re.search(r'\[\s*\d+\]\s+\d+\.\d+-\d+\.\d+\s+sec\s+.*?\s+(\d+\.\d+)\s+Mbits/sec', line)
+if match:
+    bw = float(match.group(1))
+    print(f"[bandwidth matched] {bw}")
+    with lock:
+        bandwidths.append(bw)
+        time_points.append(time_counter)
+        time_counter += 1
