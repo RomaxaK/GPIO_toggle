@@ -36,8 +36,16 @@ typedef enum {
 static volatile grant_mode_t current_grant_mode = GRANT_MODE_ALWAYS;
 static const char *TAG = "APP";
 
-//static uint32_t request_count = 0;
-//static uint32_t grant_count = 0;
+// Global counters
+static uint32_t request_count = 0;
+static uint32_t grant_count = 0;
+
+// Reset counters function
+void reset_counters(void) {
+    request_count = 0;
+    grant_count = 0;
+    printf("Counters reset\n");
+}
 
 void handle_uart_command(const char *cmd) {
     if (strcmp(cmd, "CMD,GRANT_MODE,ALWAYS") == 0) {
@@ -49,6 +57,8 @@ void handle_uart_command(const char *cmd) {
     } else if (strcmp(cmd, "CMD,GRANT_MODE,RANDOM") == 0) {
         current_grant_mode = GRANT_MODE_RANDOM;
         printf("GRANT_MODE set to RANDOM\n");
+    } else if (strcmp(cmd, "CMD,RESET_COUNTERS") == 0) {
+        reset_counters();
     } else {
         printf("Unknown command: %s\n", cmd);
     }
@@ -73,8 +83,6 @@ void uart_task(void *arg) {
 }
 
 void request_grant_task(void *arg) {
-    static uint32_t request_count = 0;
-    static uint32_t grant_count = 0;
     int last_request = 0;
     int grant_active = 0;
 
