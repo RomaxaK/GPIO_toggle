@@ -11,10 +11,6 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.animation import FuncAnimation
 
-# ====== Serial Configuration ======
-SERIAL_PORT = 'COM9'
-BAUD_RATE = 115200
-
 # ====== Data Buffers ======
 throughputs = deque(maxlen=100)
 time_points = deque(maxlen=100)
@@ -23,10 +19,10 @@ lock = threading.Lock()
 
 # ====== Serial Communication Thread ======
 class SerialReader(threading.Thread):
-    def __init__(self, callback):
+    def __init__(self, port, baudrate, callback):
         super().__init__(daemon=True)
         self.callback = callback
-        self.ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
+        self.ser = serial.Serial(port, baudrate, timeout=1)
 
     def run(self):
         while True:
@@ -143,8 +139,7 @@ class ESP32IperfGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("ESP32 + iPerf3 Monitor")
-        self.reader = SerialReader(self.update_stats)
-        self.reader.start()
+        self.reader = None
         self.last_req = -1
         self.last_grant = -1
         self.build_gui()
@@ -153,6 +148,17 @@ class ESP32IperfGUI:
         left = tk.Frame(self.root)
         left.pack(side=tk.LEFT, padx=10, pady=10)
 
+        # Serial Port + Baudrate
+        tk.Label(left, text="Serial Port:").pack()
+        self.serial_port_entry = tk.Entry(left)
+        self.serial_port_entry.insert(0, "COM9")
+        self.serial_port_entry.pack()
+
+        tk.Label(left, text="Baud Rate:").pack()
+        self.baudrate_entry = tk.Entry(left)
+        self.baudrate_entry.insert(0, "115200")
+        self.baudrate_entry.pack()
+
         # iPerf3 Path
         tk.Label(left, text="iPerf3 Path:").pack()
         self.iperf_path_entry = tk.Entry(left, width=40)
@@ -160,10 +166,11 @@ class ESP32IperfGUI:
         self.iperf_path_entry.pack()
         tk.Button(left, text="Browse", command=self.browse_iperf_path).pack(pady=3)
 
-        # Grant Mode Buttons
+        # Grant Mode
         tk.Button(left, text="Always Grant", command=lambda: self.reader.send_command("CMD,GRANT_MODE,ALWAYS")).pack(pady=3)
         tk.Button(left, text="No Grant", command=lambda: self.reader.send_command("CMD,GRANT_MODE,NONE")).pack(pady=3)
         tk.Button(left, text="Random Grant", command=lambda: self.reader.send_command("CMD,GRANT_MODE,RANDOM")).pack(pady=3)
+        tk.Button(left, text="Clear Counters", command=self.clear_counters).pack(pady=5)
 
         # iPerf3 Config
         tk.Label(left, text="Server IP:").pack()
@@ -196,7 +203,6 @@ class ESP32IperfGUI:
         self.req_label.pack(pady=10)
         self.grant_label = tk.Label(left, text="Grants: 0", font=("Arial", 12))
         self.grant_label.pack(pady=10)
-        tk.Button(left, text="Clear Counters", command=self.clear_counters).pack(pady=5)
 
         right = tk.Frame(self.root)
         right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
@@ -218,6 +224,13 @@ class ESP32IperfGUI:
         )
 
     def start_iperf(self):
+        # Initialize SerialReader with selected port and baudrate
+        if self.reader is None:
+            port = self.serial_port_entry.get().strip()
+            baudrate = int(self.baudrate_entry.get().strip())
+            self.reader = SerialReader(port, baudrate, self.update_stats)
+            self.reader.start()
+
         with lock:
             throughputs.clear()
             time_points.clear()
@@ -232,11 +245,13 @@ class ESP32IperfGUI:
         self.plot.save_log_now()
 
     def clear_counters(self):
+        if self.reader:
+            self.reader.send_command("CMD,RESET_COUNTERS")
         self.last_req = 0
         self.last_grant = 0
         self.req_label.config(text="Requests: 0")
         self.grant_label.config(text="Grants: 0")
-        print("[Counters cleared]")
+        print("[Counters cleared on ESP32 and GUI]")
 
     def update_stats(self, req, grant):
         if req != self.last_req:
