@@ -1,4 +1,5 @@
 import tkinter as tk
+from tkinter import filedialog
 import serial
 import threading
 import subprocess
@@ -80,8 +81,7 @@ class ThroughputPlot:
             return
         self.running = True
 
-        # Get configuration
-        ip, port, duration, interval = self.config_getter()
+        ip, port, duration, interval, iperf_path = self.config_getter()
 
         log_name = f"iperf3_log_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.csv"
         self.log_file = open(log_name, 'w', newline='')
@@ -90,7 +90,7 @@ class ThroughputPlot:
 
         def run():
             global time_counter
-            cmd = ["iperf3", "-c", ip, "-p", port, "-i", interval, "-t", duration, "--forceflush"]
+            cmd = [iperf_path, "-c", ip, "-p", port, "-i", interval, "-t", duration, "--forceflush"]
             try:
                 print(f"[iperf3 started] {cmd}")
                 self.iperf_process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -145,22 +145,27 @@ class ESP32IperfGUI:
         self.root.title("ESP32 + iPerf3 Monitor")
         self.reader = SerialReader(self.update_stats)
         self.reader.start()
-
         self.last_req = -1
         self.last_grant = -1
-
         self.build_gui()
 
     def build_gui(self):
         left = tk.Frame(self.root)
         left.pack(side=tk.LEFT, padx=10, pady=10)
 
-        # Control buttons
-        tk.Button(left, text="Always Grant", command=lambda: self.reader.send_command("CMD,GRANT_MODE,ALWAYS")).pack(pady=5)
-        tk.Button(left, text="No Grant", command=lambda: self.reader.send_command("CMD,GRANT_MODE,NONE")).pack(pady=5)
-        tk.Button(left, text="Random Grant", command=lambda: self.reader.send_command("CMD,GRANT_MODE,RANDOM")).pack(pady=5)
+        # iPerf3 Path
+        tk.Label(left, text="iPerf3 Path:").pack()
+        self.iperf_path_entry = tk.Entry(left, width=40)
+        self.iperf_path_entry.insert(0, "C:/Users/rk52524/Downloads/iperf3.12_64/iperf3.exe")
+        self.iperf_path_entry.pack()
+        tk.Button(left, text="Browse", command=self.browse_iperf_path).pack(pady=3)
 
-        # Config fields
+        # Grant Mode Buttons
+        tk.Button(left, text="Always Grant", command=lambda: self.reader.send_command("CMD,GRANT_MODE,ALWAYS")).pack(pady=3)
+        tk.Button(left, text="No Grant", command=lambda: self.reader.send_command("CMD,GRANT_MODE,NONE")).pack(pady=3)
+        tk.Button(left, text="Random Grant", command=lambda: self.reader.send_command("CMD,GRANT_MODE,RANDOM")).pack(pady=3)
+
+        # iPerf3 Config
         tk.Label(left, text="Server IP:").pack()
         self.ip_entry = tk.Entry(left)
         self.ip_entry.insert(0, "192.168.1.4")
@@ -182,26 +187,34 @@ class ESP32IperfGUI:
         self.interval_entry.pack()
 
         # iPerf3 Controls
-        tk.Button(left, text="Start iPerf3", command=self.start_iperf).pack(pady=5)
-        tk.Button(left, text="Stop iPerf3", command=self.stop_iperf).pack(pady=5)
-        tk.Button(left, text="Save Log", command=self.save_log).pack(pady=5)
+        tk.Button(left, text="Start iPerf3", command=self.start_iperf).pack(pady=3)
+        tk.Button(left, text="Stop iPerf3", command=self.stop_iperf).pack(pady=3)
+        tk.Button(left, text="Save Log", command=self.save_log).pack(pady=3)
 
-        # Labels
+        # Counters
         self.req_label = tk.Label(left, text="Requests: 0", font=("Arial", 12))
         self.req_label.pack(pady=10)
         self.grant_label = tk.Label(left, text="Grants: 0", font=("Arial", 12))
         self.grant_label.pack(pady=10)
+        tk.Button(left, text="Clear Counters", command=self.clear_counters).pack(pady=5)
 
         right = tk.Frame(self.root)
         right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
         self.plot = ThroughputPlot(right, self.get_config)
+
+    def browse_iperf_path(self):
+        path = filedialog.askopenfilename(title="Select iperf3 executable", filetypes=[("Executable", "*.exe")])
+        if path:
+            self.iperf_path_entry.delete(0, tk.END)
+            self.iperf_path_entry.insert(0, path)
 
     def get_config(self):
         return (
             self.ip_entry.get().strip(),
             self.port_entry.get().strip(),
             self.duration_entry.get().strip(),
-            self.interval_entry.get().strip()
+            self.interval_entry.get().strip(),
+            self.iperf_path_entry.get().strip()
         )
 
     def start_iperf(self):
@@ -217,6 +230,13 @@ class ESP32IperfGUI:
 
     def save_log(self):
         self.plot.save_log_now()
+
+    def clear_counters(self):
+        self.last_req = 0
+        self.last_grant = 0
+        self.req_label.config(text="Requests: 0")
+        self.grant_label.config(text="Grants: 0")
+        print("[Counters cleared]")
 
     def update_stats(self, req, grant):
         if req != self.last_req:
