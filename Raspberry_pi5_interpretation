@@ -8,7 +8,7 @@ import csv
 from datetime import datetime
 from collections import deque
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.animation import FuncAnimation
 
 # ====== Data Buffers ======
@@ -51,6 +51,8 @@ class ThroughputPlot:
     def __init__(self, parent, config_getter):
         self.fig, self.ax = plt.subplots(figsize=(5, 3))
         self.canvas = FigureCanvasTkAgg(self.fig, master=parent)
+        self.toolbar = NavigationToolbar2Tk(self.canvas, parent)
+        self.toolbar.update()
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         self.ani = FuncAnimation(self.fig, self.update_plot, interval=1000, blit=False)
         self.iperf_process = None
@@ -224,7 +226,6 @@ class ESP32IperfGUI:
         )
 
     def start_iperf(self):
-        # Initialize SerialReader with selected port and baudrate
         if self.reader is None:
             port = self.serial_port_entry.get().strip()
             baudrate = int(self.baudrate_entry.get().strip())
