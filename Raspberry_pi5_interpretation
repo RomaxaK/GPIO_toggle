@@ -5,6 +5,7 @@ import threading
 import subprocess
 import re
 import csv
+import pandas as pd
 from datetime import datetime
 from collections import deque
 import matplotlib.pyplot as plt
@@ -12,12 +13,11 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 from matplotlib.animation import FuncAnimation
 
 # ====== Data Buffers ======
-throughputs = deque(maxlen=100)
-time_points = deque(maxlen=100)
+throughputs = deque(maxlen=200)
+time_points = deque(maxlen=200)
 time_counter = 0
 lock = threading.Lock()
 
-# ====== Serial Communication Thread ======
 class SerialReader(threading.Thread):
     def __init__(self, port, baudrate, callback):
         super().__init__(daemon=True)
@@ -46,7 +46,6 @@ class SerialReader(threading.Thread):
         except Exception as e:
             print(f"Write error: {e}")
 
-# ====== Throughput Plot Component ======
 class ThroughputPlot:
     def __init__(self, parent, config_getter):
         self.fig, self.ax = plt.subplots(figsize=(5, 3))
@@ -54,24 +53,58 @@ class ThroughputPlot:
         self.toolbar = NavigationToolbar2Tk(self.canvas, parent)
         self.toolbar.update()
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
         self.ani = FuncAnimation(self.fig, self.update_plot, interval=1000, blit=False)
         self.iperf_process = None
         self.running = False
         self.log_file = None
         self.log_writer = None
+        self.full_log_file = None
+        self.full_log_writer = None
         self.config_getter = config_getter
 
+        # Connect pan/zoom event
+        self.ax.callbacks.connect('xlim_changed', self.on_xlim_change)
+        self.showing_historical = False
+
     def update_plot(self, frame):
+        if self.showing_historical:
+            return  # Skip live update if showing historical data
         with lock:
             if not time_points or not throughputs:
                 return
             self.ax.clear()
             self.ax.plot(time_points, throughputs, label="Throughput (Mbit/s)")
-            self.ax.set_title("iPerf3 Throughput")
+            self.ax.set_title("iPerf3 Throughput (Live)")
             self.ax.set_xlabel("Time (s)")
             self.ax.set_ylabel("Mbit/s")
             self.ax.grid(True)
             self.ax.legend()
+
+    def on_xlim_change(self, event_ax):
+        xlim = event_ax.get_xlim()
+        left, right = int(xlim[0]), int(xlim[1])
+
+        if left < max(0, time_counter - 200):
+            print(f"[PANNING BACK] Loading historical data: {left} to {right}")
+            self.load_historical_data(left, right)
+            self.showing_historical = True
+        elif self.showing_historical and left >= max(0, time_counter - 200):
+            print(f"[RETURNING TO LIVE VIEW]")
+            self.showing_historical = False
+
+    def load_historical_data(self, start_time, end_time):
+        df = pd.read_csv(self.full_log_file.name)
+        slice_df = df[(df["Time (s)"] >= start_time) & (df["Time (s)"] <= end_time)]
+
+        self.ax.clear()
+        self.ax.plot(slice_df["Time (s)"], slice_df["Throughput (Mbit/s)"], label="Throughput (Mbit/s)")
+        self.ax.set_title(f"iPerf3 Historical {start_time}-{end_time}s")
+        self.ax.set_xlabel("Time (s)")
+        self.ax.set_ylabel("Mbit/s")
+        self.ax.grid(True)
+        self.ax.legend()
+        self.canvas.draw()
 
     def start_iperf(self):
         if self.running:
@@ -82,9 +115,15 @@ class ThroughputPlot:
         ip, port, duration, interval, iperf_path = self.config_getter()
 
         log_name = f"iperf3_log_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.csv"
+        full_log_name = f"iperf3_full_log_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.csv"
+
         self.log_file = open(log_name, 'w', newline='')
         self.log_writer = csv.writer(self.log_file)
         self.log_writer.writerow(["Time (s)", "Throughput (Mbit/s)"])
+
+        self.full_log_file = open(full_log_name, 'w', newline='')
+        self.full_log_writer = csv.writer(self.full_log_file)
+        self.full_log_writer.writerow(["Time (s)", "Throughput (Mbit/s)"])
 
         def run():
             global time_counter
@@ -106,6 +145,7 @@ class ThroughputPlot:
                             time_points.append(time_counter)
                             time_counter += 1
                         self.log_writer.writerow([time_counter, throughput])
+                        self.full_log_writer.writerow([time_counter, throughput])
             except Exception as e:
                 print(f"[iperf3 error] {e}")
             finally:
@@ -116,6 +156,8 @@ class ThroughputPlot:
                     self.log_file.close()
                     self.log_file = None
                     self.log_writer = None
+                if self.full_log_file:
+                    self.full_log_file.close()
                 print("[iperf3] Process stopped.")
 
         threading.Thread(target=run, daemon=True).start()
@@ -136,7 +178,6 @@ class ThroughputPlot:
                     writer.writerow([t, th])
         print(f"[Log saved manually] {log_name}")
 
-# ====== GUI Application ======
 class ESP32IperfGUI:
     def __init__(self, root):
         self.root = root
@@ -150,7 +191,6 @@ class ESP32IperfGUI:
         left = tk.Frame(self.root)
         left.pack(side=tk.LEFT, padx=10, pady=10)
 
-        # Serial Port + Baudrate
         tk.Label(left, text="Serial Port:").pack()
         self.serial_port_entry = tk.Entry(left)
         self.serial_port_entry.insert(0, "COM9")
@@ -161,20 +201,17 @@ class ESP32IperfGUI:
         self.baudrate_entry.insert(0, "115200")
         self.baudrate_entry.pack()
 
-        # iPerf3 Path
         tk.Label(left, text="iPerf3 Path:").pack()
         self.iperf_path_entry = tk.Entry(left, width=40)
         self.iperf_path_entry.insert(0, "C:/Users/rk52524/Downloads/iperf3.12_64/iperf3.exe")
         self.iperf_path_entry.pack()
         tk.Button(left, text="Browse", command=self.browse_iperf_path).pack(pady=3)
 
-        # Grant Mode
         tk.Button(left, text="Always Grant", command=lambda: self.reader.send_command("CMD,GRANT_MODE,ALWAYS")).pack(pady=3)
         tk.Button(left, text="No Grant", command=lambda: self.reader.send_command("CMD,GRANT_MODE,NONE")).pack(pady=3)
         tk.Button(left, text="Random Grant", command=lambda: self.reader.send_command("CMD,GRANT_MODE,RANDOM")).pack(pady=3)
         tk.Button(left, text="Clear Counters", command=self.clear_counters).pack(pady=5)
 
-        # iPerf3 Config
         tk.Label(left, text="Server IP:").pack()
         self.ip_entry = tk.Entry(left)
         self.ip_entry.insert(0, "192.168.1.4")
@@ -195,12 +232,10 @@ class ESP32IperfGUI:
         self.interval_entry.insert(0, "1")
         self.interval_entry.pack()
 
-        # iPerf3 Controls
         tk.Button(left, text="Start iPerf3", command=self.start_iperf).pack(pady=3)
         tk.Button(left, text="Stop iPerf3", command=self.stop_iperf).pack(pady=3)
         tk.Button(left, text="Save Log", command=self.save_log).pack(pady=3)
 
-        # Counters
         self.req_label = tk.Label(left, text="Requests: 0", font=("Arial", 12))
         self.req_label.pack(pady=10)
         self.grant_label = tk.Label(left, text="Grants: 0", font=("Arial", 12))
@@ -262,7 +297,6 @@ class ESP32IperfGUI:
             self.grant_label.config(text=f"Grants: {grant}")
             self.last_grant = grant
 
-# ====== Entry Point ======
 if __name__ == "__main__":
     root = tk.Tk()
     app = ESP32IperfGUI(root)
