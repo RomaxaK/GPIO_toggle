@@ -1,76 +1,156 @@
-import subprocess
-import threading
-import re
-import tkinter as tk
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "driver/gpio.h"
+#include "esp_log.h"
+#include "esp_rom_sys.h"
+#include "soc/gpio_struct.h"
+#include "esp_intr_alloc.h"
+#include "hal/gpio_hal.h"
+#include "esp32c6/rom/gpio.h"
+#include "esp_timer.h"
+#include "esp_system.h"
+#include "esp_random.h"
+#include "esp_mac.h"
+#include "esp_task_wdt.h"
+#include "driver/uart.h"
+#include "inttypes.h"
 
-class Iperf3Plotter:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("iPerf3 Real-Time Bandwidth Monitor")
+#define UART_PORT       UART_NUM_0
+#define UART_TX_PIN     GPIO_NUM_16
+#define UART_RX_PIN     GPIO_NUM_17
+#define UART_BUF_SIZE   1024
 
-        self.bandwidths = []
-        self.time_points = []
+#define REQUEST_GPIO        GPIO_NUM_6
+#define GRANT_GPIO          GPIO_NUM_7
+#define SWITCH_GRANT_GPIO   GPIO_NUM_11
 
-        # Create plot
-        self.fig, self.ax = plt.subplots(figsize=(6, 4))
-        self.ax.set_title("iPerf3 Bandwidth (Mbits/sec)")
-        self.ax.set_xlabel("Seconds")
-        self.ax.set_ylabel("Bandwidth")
+typedef enum {
+    GRANT_MODE_ALWAYS,
+    GRANT_MODE_NONE,
+    GRANT_MODE_RANDOM
+} grant_mode_t;
 
-        # Embed plot into Tkinter window
-        self.canvas = FigureCanvasTkAgg(self.fig, master=root)
-        self.canvas.get_tk_widget().pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+static volatile grant_mode_t current_grant_mode = GRANT_MODE_ALWAYS;
+static const char *TAG = "APP";
 
-        # Start the iperf3 process in background
-        threading.Thread(target=self.run_iperf3, daemon=True).start()
+//static uint32_t request_count = 0;
+//static uint32_t grant_count = 0;
 
-        # Animate the plot
-        self.ani = FuncAnimation(self.fig, self.update_plot, interval=1000)
+void handle_uart_command(const char *cmd) {
+    if (strcmp(cmd, "CMD,GRANT_MODE,ALWAYS") == 0) {
+        current_grant_mode = GRANT_MODE_ALWAYS;
+        printf("GRANT_MODE set to ALWAYS\n");
+    } else if (strcmp(cmd, "CMD,GRANT_MODE,NONE") == 0) {
+        current_grant_mode = GRANT_MODE_NONE;
+        printf("GRANT_MODE set to NONE\n");
+    } else if (strcmp(cmd, "CMD,GRANT_MODE,RANDOM") == 0) {
+        current_grant_mode = GRANT_MODE_RANDOM;
+        printf("GRANT_MODE set to RANDOM\n");
+    } else {
+        printf("Unknown command: %s\n", cmd);
+    }
+}
 
-    def run_iperf3(self):
-        cmd = [
-            "C:\\Users\\rk52524\\Downloads\\iperf3.12_64\\iperf3.exe",
-            "-c", "192.168.1.4",  # CHANGE to your server IP
-            "-p", "5202",
-            "-i", "1",
-            "-t", "9999"
-        ]
-        try:
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-            for line in iter(process.stdout.readline, ''):
-                print(f"[iperf3 stdout] {line.strip()}")
-                self.parse_output(line.strip())
-        except FileNotFoundError:
-            print("ERROR: iperf3 executable not found. Check the path.")
-        except Exception as e:
-            print(f"Error running iperf3: {e}")
+void uart_task(void *arg) {
+    uint8_t data[UART_BUF_SIZE];
 
-    def parse_output(self, line):
-        match = re.search(r'\[\s*\d+\]\s+\d+\.\d+-\d+\.\d+\s+sec\s+\d+\s+\w+Bytes\s+([\d.]+)\s+Mbits/sec', line)
-        if match:
-            bandwidth = float(match.group(1))
-            self.bandwidths.append(bandwidth)
-            self.time_points.append(len(self.bandwidths))
+    while (1) {
+        int len = uart_read_bytes(UART_PORT, data, sizeof(data) - 1, pdMS_TO_TICKS(100));
+        if (len > 0) {
+            data[len] = '\0';
+            for (int i = 0; i < len; i++) {
+                if (data[i] == '\r' || data[i] == '\n') {
+                    data[i] = '\0';
+                    break;
+                }
+            }
+            handle_uart_command((const char *)data);
+        }
+    }
+}
 
-    def update_plot(self, frame):
-        print("update_plot() called")
-        print(f"Data points: {len(self.bandwidths)}")
-        if self.bandwidths:
-            print(f"Last value: {self.bandwidths[-1]}")
-        else:
-            print("Last value: None")
+void request_grant_task(void *arg) {
+    static uint32_t request_count = 0;
+    static uint32_t grant_count = 0;
+    int last_request = 0;
+    int grant_active = 0;
 
-        self.ax.clear()
-        self.ax.set_title("iPerf3 Bandwidth (Mbits/sec)")
-        self.ax.set_xlabel("Seconds")
-        self.ax.set_ylabel("Bandwidth")
-        self.ax.plot(self.time_points, self.bandwidths, marker='o')
-        self.ax.grid(True)
+    ESP_LOGI(TAG, "Request-Grant task started");
 
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = Iperf3Plotter(root)
-    root.mainloop()
+    while (1) {
+        int request = gpio_get_level(REQUEST_GPIO);
+        bool grant = false;
+
+        if (request && !last_request) {
+            request_count++;
+
+            switch (current_grant_mode) {
+                case GRANT_MODE_ALWAYS:
+                    grant = true;
+                    break;
+                case GRANT_MODE_NONE:
+                    grant = false;
+                    break;
+                case GRANT_MODE_RANDOM:
+                    grant = (esp_random() % 100) < 10;
+                    break;
+            }
+
+            if (grant) {
+                gpio_set_level(GRANT_GPIO, 0);           
+                gpio_set_level(SWITCH_GRANT_GPIO, 0);    
+                grant_active = 1;
+                grant_count++;
+            }
+        }
+
+        if (!request && last_request && grant_active) {
+            gpio_set_level(GRANT_GPIO, 1);          
+            gpio_set_level(SWITCH_GRANT_GPIO, 1);
+            grant_active = 0;
+        }
+
+        last_request = request;
+
+        static uint32_t last_print = 0;
+        if (esp_log_timestamp() - last_print > 1000) {
+            char stats_msg[64];
+            snprintf(stats_msg, sizeof(stats_msg), "STATS,%" PRIu32 ",%" PRIu32 "\n", request_count, grant_count);
+            uart_write_bytes(UART_PORT, stats_msg, strlen(stats_msg));
+            last_print = esp_log_timestamp();
+        }
+
+        esp_rom_delay_us(10);
+    }
+}
+
+void app_main(void) {
+    gpio_reset_pin(REQUEST_GPIO);
+    gpio_set_direction(REQUEST_GPIO, GPIO_MODE_INPUT);
+    gpio_pullup_en(REQUEST_GPIO);
+
+    gpio_reset_pin(GRANT_GPIO);
+    gpio_set_direction(GRANT_GPIO, GPIO_MODE_OUTPUT);
+    gpio_set_level(GRANT_GPIO, 1);
+
+    gpio_reset_pin(SWITCH_GRANT_GPIO);
+    gpio_set_direction(SWITCH_GRANT_GPIO, GPIO_MODE_OUTPUT);
+    gpio_set_level(SWITCH_GRANT_GPIO, 1);
+
+    const uart_config_t uart_config = {
+        .baud_rate = 115200,
+        .data_bits = UART_DATA_8_BITS,
+        .parity    = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+    };
+    uart_param_config(UART_PORT, &uart_config);
+    uart_set_pin(UART_PORT, UART_TX_PIN, UART_RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    uart_driver_install(UART_PORT, UART_BUF_SIZE * 2, 0, 0, NULL, 0);
+
+    xTaskCreatePinnedToCore(uart_task, "uart_task", 4096, NULL, 10, NULL, tskNO_AFFINITY);
+    xTaskCreatePinnedToCore(request_grant_task, "request_grant_task", 4096, NULL, 9, NULL, tskNO_AFFINITY);
+}
