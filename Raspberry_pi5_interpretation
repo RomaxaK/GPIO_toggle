@@ -12,6 +12,10 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.animation import FuncAnimation
 
+# ====== Constants ======
+SERIAL_PORT = 'COM9'
+BAUD_RATE = 115200
+
 # ====== Data Buffers ======
 throughputs = deque(maxlen=100)
 time_points = deque(maxlen=100)
@@ -19,10 +23,10 @@ time_counter = 0
 lock = threading.Lock()
 
 class SerialReader(threading.Thread):
-    def __init__(self, port, baudrate, callback):
+    def __init__(self, callback):
         super().__init__(daemon=True)
         self.callback = callback
-        self.ser = serial.Serial(port, baudrate, timeout=1)
+        self.ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
 
     def run(self):
         while True:
@@ -63,13 +67,12 @@ class ThroughputPlot:
         self.full_log_writer = None
         self.config_getter = config_getter
 
-        # Connect pan/zoom event
         self.ax.callbacks.connect('xlim_changed', self.on_xlim_change)
         self.showing_historical = False
 
     def update_plot(self, frame):
         if self.showing_historical:
-            return  # Skip live update if showing historical data
+            return
         with lock:
             if not time_points or not throughputs:
                 return
@@ -182,7 +185,8 @@ class ESP32IperfGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("ESP32 + iPerf3 Monitor")
-        self.reader = None
+        self.reader = SerialReader(self.update_stats)
+        self.reader.start()
         self.last_req = -1
         self.last_grant = -1
         self.build_gui()
@@ -190,16 +194,6 @@ class ESP32IperfGUI:
     def build_gui(self):
         left = tk.Frame(self.root)
         left.pack(side=tk.LEFT, padx=10, pady=10)
-
-        tk.Label(left, text="Serial Port:").pack()
-        self.serial_port_entry = tk.Entry(left)
-        self.serial_port_entry.insert(0, "COM9")
-        self.serial_port_entry.pack()
-
-        tk.Label(left, text="Baud Rate:").pack()
-        self.baudrate_entry = tk.Entry(left)
-        self.baudrate_entry.insert(0, "115200")
-        self.baudrate_entry.pack()
 
         tk.Label(left, text="iPerf3 Path:").pack()
         self.iperf_path_entry = tk.Entry(left, width=40)
@@ -261,12 +255,6 @@ class ESP32IperfGUI:
         )
 
     def start_iperf(self):
-        if self.reader is None:
-            port = self.serial_port_entry.get().strip()
-            baudrate = int(self.baudrate_entry.get().strip())
-            self.reader = SerialReader(port, baudrate, self.update_stats)
-            self.reader.start()
-
         with lock:
             throughputs.clear()
             time_points.clear()
