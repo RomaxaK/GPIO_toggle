@@ -1,7 +1,6 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import serial
-import threading
 
 class QPGCommandGUI:
     def __init__(self, root):
@@ -61,7 +60,7 @@ class QPGCommandGUI:
             new_lines = []
             for line in self.command_lines:
                 if line.strip().lower().startswith("packetcount"):
-                    new_lines.append(f"packetcount {override_count}\n")
+                    new_lines.append(f"PACKETCOUNT {override_count}\n")
                 else:
                     new_lines.append(line)
             self.command_lines = new_lines
@@ -81,6 +80,10 @@ class QPGCommandGUI:
                 if cmd:
                     print(f"[SEND] {cmd}")
                     self.serial_conn.write((cmd + "\n").encode())
+
+            # Trigger TX at the end
+            self.serial_conn.write(("TX\n").encode())
+            print("[SEND] TX")
         except Exception as e:
             messagebox.showerror("TX Error", str(e))
 
