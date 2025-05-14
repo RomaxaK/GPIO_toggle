@@ -1,173 +1,47 @@
-import time
-import csv
-import serial
-from random import shuffle
-import serial.tools.list_ports
-import pandas as pd
-
-from qorvo.rcc.ptc_versions.v1 import ptcdriver as ptcv1
+import tkinter as tk
+from tkinter import messagebox
 from qorvo.rcc.ptc_versions.v3 import ptcdriver as ptcv3
+from qorvo.rcc.ptc_versions.v1 import ptcdriver as ptcv1
 
+class QPGTestGUI:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("QPG6200L + QPG7015M Controller")
 
-# Inputs
-Test_Channels = list(range(0,40))
-shuffle(Test_Channels)
-print(Test_Channels)
+        self.tx_device = None
+        self.rx_device = None
 
-TX_packetcount = 100
-Tx_packet_length = 40       # in Bytes
-TX_Power = 8               # in dBm
-Config_sleep = 1            # in seconds (Sleep Time after packet transmission. Adjusted according to number of TX packets and packet length)
+        # TX Connect
+        tk.Button(root, text="Connect TX (QPG6200L - COM7)", command=self.connect_tx).pack(pady=5)
+        self.tx_status = tk.Label(root, text="TX Status: Not connected", fg="red")
+        self.tx_status.pack()
 
-def main():
+        # RX Connect
+        tk.Button(root, text="Connect RX (QPG7015M - 192.168.1.4:9192)", command=self.connect_rx).pack(pady=5)
+        self.rx_status = tk.Label(root, text="RX Status: Not connected", fg="red")
+        self.rx_status.pack()
 
-    # TX device configuration
-    # ptc_TX = ptcv3.PTC.new_connection('COM35:115200')             ## TX device QPG6200  use ptcv3 and COM Port
-    ptc_TX = ptcv1.PTC.new_connection('10.153.16.30:9192')          ## TX device QPG7015M use ptcv1 and IP address
-    ptc_TX.disable_rx_mode()
-    ptc_TX.stop_tx_packets()
-    ptc_TX.phy = ptc_TX.PhyMode.BLE
-    ptc_TX.reset_packet_counters()
-    ptc_TX.antenna = ptc_TX.AntennaValues.A1
-    ptc_TX.packet_length = Tx_packet_length
-    ptc_TX.channel = 0
-    ptc_TX.power = TX_Power
+    def connect_tx(self):
+        try:
+            self.tx_device = ptcv3.PTC.new_connection("COM7:115200")
+            info = self.tx_device.get_device_info()
+            self.tx_status.config(text=f"TX Connected: {info}", fg="green")
+            print(f"[TX] {info}")
+        except Exception as e:
+            messagebox.showerror("TX Connection Error", str(e))
+            self.tx_status.config(text="TX Status: Connection failed", fg="red")
 
-    print(f"TX {ptc_TX.get_device_info()}","\n")
-    stats_TX = ptc_TX.get_packet_statistics()
-    print(stats_TX,"\n")
-
-    # RX1 device configuration
-    ptc_RX1 = ptcv3.PTC.new_connection('COM37:115200')
-    ptc_RX1.disable_rx_mode()
-    ptc_RX1.phy = ptc_RX1.PhyMode.BLE
-    ptc_RX1.reset_packet_counters()
-    ptc_RX1.antenna = ptc_RX1.AntennaValues.AUTO                   #Auto means Enable antenna diversity
-    ptc_RX1.channel = 0
-
-    ptc_RX1.disable_rx_mode()
-    print(f"RX1 {ptc_RX1.get_device_info()}","\n")
-    stats_RX1 = ptc_RX1.get_packet_statistics()
-    print(stats_RX1,"\n")
-
-    # RX2 device configuration
-    ptc_RX2 = ptcv3.PTC.new_connection('COM38:115200')
-    ptc_RX2.disable_rx_mode()
-    ptc_RX2.phy = ptc_RX2.PhyMode.BLE
-    ptc_RX2.reset_packet_counters()
-    ptc_RX2.antenna = ptc_RX2.AntennaValues.A0
-    ptc_RX2.channel = 0
-
-    ptc_RX2.disable_rx_mode()
-    print(f"RX2 {ptc_RX2.get_device_info()}","\n")
-    stats_RX2 = ptc_RX2.get_packet_statistics()
-    print(stats_RX2,"\n")
-
-    # RX3 device configuration
-    ptc_RX3 = ptcv3.PTC.new_connection('COM40:115200')
-    ptc_RX3.disable_rx_mode()
-    ptc_RX3.phy = ptc_RX3.PhyMode.BLE
-    ptc_RX3.reset_packet_counters()
-    ptc_RX3.antenna = ptc_RX3.AntennaValues.A1
-    ptc_RX3.channel = 0
-
-    ptc_RX3.disable_rx_mode()
-    print(f"RX3 {ptc_RX3.get_device_info()}","\n")
-    stats_RX3 = ptc_RX3.get_packet_statistics()
-    print(stats_RX3,"\n")
-
-    BLE_Channel = []
-    RX_1_packetcount = []
-    RX_2_packetcount = []
-    RX_3_packetcount = []
-
-    # Write Data in CSV file
-    filename = f"data_TX_Power_{TX_Power}_Packet_Count_{TX_packetcount}_Packet_Length_{Tx_packet_length}_{time.strftime('%d_%m_%Y_%H_%M_%S')}"
-    fieldnames = ["BLE_Channel", "Packet_Count_RX_1", "Packet_Count_RX_2", "Packet_Count_RX_3", "PER%_RX_1", "PER%_RX_2", "PER%_RX_3"]
-
-    with open(f'{filename}.csv','w', newline='') as csv_file:
-        csv_writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
-        csv_writer.writeheader()
-
-    for i in range(len(Test_Channels)):
-
-        ptc_TX.channel = Test_Channels[i]
-        ptc_RX1.channel = Test_Channels[i]
-        ptc_RX2.channel = Test_Channels[i]
-        ptc_RX3.channel = Test_Channels[i]
-
-        ptc_TX.reset_packet_counters()
-        ptc_RX1.reset_packet_counters()
-        ptc_RX2.reset_packet_counters()
-        ptc_RX3.reset_packet_counters()
-
-        ptc_RX1.enable_rx_mode()
-        ptc_RX2.enable_rx_mode()
-        ptc_RX3.enable_rx_mode()
-
-        ptc_TX.start_tx_packets(count=TX_packetcount, interval_ms=10)
-        time.sleep(Config_sleep)
-        ptc_TX.stop_tx_packets()
-
-        ptc_RX1.disable_rx_mode()
-        ptc_RX2.disable_rx_mode()
-        ptc_RX3.disable_rx_mode()
-
-        stats_RX1 = ptc_RX1.get_packet_statistics()
-        stats_RX2 = ptc_RX2.get_packet_statistics()
-        stats_RX3 = ptc_RX3.get_packet_statistics()
-
-        RX_1_packetcount.append(i)
-        RX_1_packetcount[i] = stats_RX1.rx_packet_count
-        RX_2_packetcount.append(i)
-        RX_2_packetcount[i] = stats_RX2.rx_packet_count
-        RX_3_packetcount.append(i)
-        RX_3_packetcount[i] = stats_RX3.rx_packet_count
-
-        BLE_Channel.append(i)
-        BLE_Channel[i]=Test_Channels[i]
-
-
-        with open(f'{filename}.csv', 'a', newline='') as csv_file:
-            csv_writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
-
-            info = {
-                "BLE_Channel": BLE_Channel[i],
-                "Packet_Count_RX_1":  RX_1_packetcount[i],
-                "Packet_Count_RX_2": RX_2_packetcount[i],
-                "Packet_Count_RX_3": RX_3_packetcount[i],
-                "PER%_RX_1": 100*(TX_packetcount - RX_1_packetcount[i]) / TX_packetcount,
-                "PER%_RX_2": 100*(TX_packetcount - RX_2_packetcount[i]) / TX_packetcount,
-                "PER%_RX_3": 100*(TX_packetcount - RX_3_packetcount[i]) / TX_packetcount,
-            }
-            csv_writer.writerow(info)
-
-
-
-    ptc_RX1.disable_rx_mode()
-    ptc_RX2.disable_rx_mode()
-    ptc_RX3.disable_rx_mode()
-
-    stats_RX1 = ptc_RX1.get_packet_statistics()
-    print(f"\nRX1 {stats_RX1}")
-    stats_RX2 = ptc_RX2.get_packet_statistics()
-    print(f"RX2 {stats_RX2}")
-    stats_RX3 = ptc_RX3.get_packet_statistics()
-    print(f"RX3 {stats_RX3}")
-
-    ## Save sorted data
-    data = pd.read_csv(f'{filename}.csv')
-    data.sort_values(["BLE_Channel"],
-                     axis=0,
-                     ascending=[True],
-                     inplace=True)
-    data.to_csv(f'{filename}_sorted.csv', index=False)
-
-    time.sleep(2)
-
-    return()
-
+    def connect_rx(self):
+        try:
+            self.rx_device = ptcv1.PTC.new_connection("192.168.1.4:9192")
+            info = self.rx_device.get_device_info()
+            self.rx_status.config(text=f"RX Connected: {info}", fg="green")
+            print(f"[RX] {info}")
+        except Exception as e:
+            messagebox.showerror("RX Connection Error", str(e))
+            self.rx_status.config(text="RX Status: Connection failed", fg="red")
 
 if __name__ == "__main__":
-    main()
-
+    root = tk.Tk()
+    app = QPGTestGUI(root)
+    root.mainloop()
