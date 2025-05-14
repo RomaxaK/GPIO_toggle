@@ -1,47 +1,48 @@
 import tkinter as tk
 from tkinter import messagebox
 from qorvo.rcc.ptc_versions.v3 import ptcdriver as ptcv3
-from qorvo.rcc.ptc_versions.v1 import ptcdriver as ptcv1
 
-class QPGTestGUI:
+class QPG6200GUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("QPG6200L + QPG7015M Controller")
+        self.root.title("QPG6200L Controller")
 
         self.tx_device = None
-        self.rx_device = None
 
-        # TX Connect
-        tk.Button(root, text="Connect TX (QPG6200L - COM7)", command=self.connect_tx).pack(pady=5)
+        tk.Button(root, text="Connect TX (QPG6200L - COM7)", command=self.connect_tx).pack(pady=10)
         self.tx_status = tk.Label(root, text="TX Status: Not connected", fg="red")
         self.tx_status.pack()
 
-        # RX Connect
-        tk.Button(root, text="Connect RX (QPG7015M - 192.168.1.4:9192)", command=self.connect_rx).pack(pady=5)
-        self.rx_status = tk.Label(root, text="RX Status: Not connected", fg="red")
-        self.rx_status.pack()
+        tk.Button(root, text="TX ON", command=self.tx_on).pack(pady=10)
 
     def connect_tx(self):
         try:
             self.tx_device = ptcv3.PTC.new_connection("COM7:115200")
             info = self.tx_device.get_device_info()
             self.tx_status.config(text=f"TX Connected: {info}", fg="green")
-            print(f"[TX] {info}")
+            print(f"[TX] Connected to QPG6200L: {info}")
         except Exception as e:
-            messagebox.showerror("TX Connection Error", str(e))
+            messagebox.showerror("Connection Error", str(e))
             self.tx_status.config(text="TX Status: Connection failed", fg="red")
 
-    def connect_rx(self):
+    def tx_on(self):
+        if not self.tx_device:
+            messagebox.showwarning("Not Connected", "Please connect to QPG6200L first.")
+            return
         try:
-            self.rx_device = ptcv1.PTC.new_connection("192.168.1.4:9192")
-            info = self.rx_device.get_device_info()
-            self.rx_status.config(text=f"RX Connected: {info}", fg="green")
-            print(f"[RX] {info}")
+            self.tx_device.disable_rx_mode()
+            self.tx_device.phy = self.tx_device.PhyMode.BLE
+            self.tx_device.antenna = self.tx_device.AntennaValues.A1
+            self.tx_device.channel = 20
+            self.tx_device.packet_length = 40
+            self.tx_device.power = 8
+            self.tx_device.reset_packet_counters()
+            self.tx_device.start_tx_packets(count=100, interval_ms=10)
+            print("[TX] Transmission started (count=100, interval=10ms)")
         except Exception as e:
-            messagebox.showerror("RX Connection Error", str(e))
-            self.rx_status.config(text="RX Status: Connection failed", fg="red")
+            messagebox.showerror("TX Error", str(e))
 
 if __name__ == "__main__":
     root = tk.Tk()
-    app = QPGTestGUI(root)
+    app = QPG6200GUI(root)
     root.mainloop()
