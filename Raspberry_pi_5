@@ -1,48 +1,99 @@
 import tkinter as tk
-from tkinter import messagebox
-from qorvo.rcc.ptc_versions.v3 import ptcdriver as ptcv3
+from tkinter import filedialog, messagebox
+import serial
+import threading
 
-class QPG6200GUI:
+class QPGCommandGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("QPG6200L Controller")
+        self.root.title("QPG6200L Hybrid Controller")
 
-        self.tx_device = None
+        self.serial_port = "COM7"
+        self.baud_rate = 115200
+        self.serial_conn = None
+        self.command_lines = []
 
-        tk.Button(root, text="Connect TX (QPG6200L - COM7)", command=self.connect_tx).pack(pady=10)
-        self.tx_status = tk.Label(root, text="TX Status: Not connected", fg="red")
-        self.tx_status.pack()
+        # GUI Layout
+        tk.Button(root, text="Connect to QPG6200L", command=self.connect_serial).pack(pady=5)
+        self.status_label = tk.Label(root, text="Status: Not connected", fg="red")
+        self.status_label.pack()
 
-        tk.Button(root, text="TX ON", command=self.tx_on).pack(pady=10)
+        # Override packetcount
+        override_frame = tk.Frame(root)
+        override_frame.pack(pady=5)
+        tk.Label(override_frame, text="Override Packet Count:").pack(side=tk.LEFT)
+        self.packetcount_entry = tk.Entry(override_frame, width=10)
+        self.packetcount_entry.insert(0, "500")
+        self.packetcount_entry.pack(side=tk.LEFT)
 
-    def connect_tx(self):
+        # Load and show command file
+        tk.Button(root, text="Load Command File", command=self.load_file).pack(pady=5)
+        self.command_text = tk.Text(root, height=10, width=60)
+        self.command_text.pack()
+
+        # Send commands
+        tk.Button(root, text="Send Commands (TX ON)", command=self.send_commands).pack(pady=10)
+
+        # Manual command sender
+        tk.Label(root, text="Send Manual Command:").pack()
+        self.manual_entry = tk.Entry(root, width=40)
+        self.manual_entry.pack()
+        tk.Button(root, text="Send", command=self.send_manual_command).pack(pady=5)
+
+    def connect_serial(self):
         try:
-            self.tx_device = ptcv3.PTC.new_connection("COM7:115200")
-            info = self.tx_device.get_device_info()
-            self.tx_status.config(text=f"TX Connected: {info}", fg="green")
-            print(f"[TX] Connected to QPG6200L: {info}")
+            self.serial_conn = serial.Serial(self.serial_port, self.baud_rate, timeout=1)
+            self.status_label.config(text="Status: Connected", fg="green")
         except Exception as e:
             messagebox.showerror("Connection Error", str(e))
-            self.tx_status.config(text="TX Status: Connection failed", fg="red")
+            self.status_label.config(text="Status: Connection failed", fg="red")
 
-    def tx_on(self):
-        if not self.tx_device:
+    def load_file(self):
+        path = filedialog.askopenfilename(filetypes=[("Text Files", "*.txt")])
+        if not path:
+            return
+        try:
+            with open(path, "r") as f:
+                self.command_lines = f.readlines()
+
+            # Apply override for packetcount
+            override_count = self.packetcount_entry.get().strip()
+            new_lines = []
+            for line in self.command_lines:
+                if line.strip().lower().startswith("packetcount"):
+                    new_lines.append(f"packetcount {override_count}\n")
+                else:
+                    new_lines.append(line)
+            self.command_lines = new_lines
+
+            self.command_text.delete("1.0", tk.END)
+            self.command_text.insert(tk.END, "".join(self.command_lines))
+        except Exception as e:
+            messagebox.showerror("File Error", str(e))
+
+    def send_commands(self):
+        if not self.serial_conn or not self.serial_conn.is_open:
             messagebox.showwarning("Not Connected", "Please connect to QPG6200L first.")
             return
         try:
-            self.tx_device.disable_rx_mode()
-            self.tx_device.phy = self.tx_device.PhyMode.BLE
-            self.tx_device.antenna = self.tx_device.AntennaValues.A1
-            self.tx_device.channel = 20
-            self.tx_device.packet_length = 40
-            self.tx_device.power = 8
-            self.tx_device.reset_packet_counters()
-            self.tx_device.start_tx_packets(count=100, interval_ms=10)
-            print("[TX] Transmission started (count=100, interval=10ms)")
+            for line in self.command_lines:
+                cmd = line.strip()
+                if cmd:
+                    print(f"[SEND] {cmd}")
+                    self.serial_conn.write((cmd + "\n").encode())
         except Exception as e:
             messagebox.showerror("TX Error", str(e))
 
+    def send_manual_command(self):
+        if not self.serial_conn or not self.serial_conn.is_open:
+            messagebox.showwarning("Not Connected", "Please connect to QPG6200L first.")
+            return
+        cmd = self.manual_entry.get().strip()
+        if cmd:
+            print(f"[MANUAL SEND] {cmd}")
+            self.serial_conn.write((cmd + "\n").encode())
+
 if __name__ == "__main__":
     root = tk.Tk()
-    app = QPG6200GUI(root)
+    app = QPGCommandGUI(root)
     root.mainloop()
