@@ -1,1 +1,123 @@
+import tkinter as tk
+from tkinter import filedialog, messagebox
+from qorvo.rcc.ptc_versions.v3 import ptcdriver as ptcv3
 
+class QPG6200LApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("QPG6200L TX Controller")
+        self.tx_device = None
+        self.cmd_dict = {}
+        self.filename = None
+
+        # GUI Elements
+        tk.Button(root, text="Connect TX (COM7)", command=self.connect_tx).pack(pady=5)
+        self.status_label = tk.Label(root, text="Not connected", fg="red")
+        self.status_label.pack()
+
+        tk.Button(root, text="Load tx.txt", command=self.load_file).pack(pady=5)
+        self.text_preview = tk.Text(root, height=12, width=70)
+        self.text_preview.pack()
+
+        # TX Start button
+        tk.Button(root, text="TX ON (Transmit)", command=self.start_tx).pack(pady=10)
+
+    def connect_tx(self):
+        try:
+            self.tx_device = ptcv3.PTC.new_connection("COM7:115200")
+            info = self.tx_device.get_device_info()
+            self.status_label.config(text=f"Connected to: {info}", fg="green")
+        except Exception as e:
+            messagebox.showerror("Connection Error", str(e))
+            self.status_label.config(text="Connection failed", fg="red")
+
+    def load_file(self):
+        self.filename = filedialog.askopenfilename(filetypes=[("Text files", "*.txt")])
+        if not self.filename:
+            return
+        try:
+            with open(self.filename, "r") as f:
+                lines = f.readlines()
+
+            self.text_preview.delete("1.0", tk.END)
+            self.cmd_dict = {}
+
+            valid_keys = {
+                "CH", "AN", "PHY", "POWER", "PACKETLENGTH", "PACKETINTERVAL", "PACKETCOUNT",
+                "PM", "MR", "SSA", "SPAN", "SETTXDATA"
+            }
+
+            for line in lines:
+                stripped = line.strip()
+                if not stripped or " " not in stripped:
+                    continue  # skip one-word lines like "r", "i", "info", "p"
+                try:
+                    key, value = stripped.split(None, 1)
+                    key = key.upper()
+                    if key in valid_keys:
+                        self.cmd_dict[key] = value.strip()
+                        self.text_preview.insert(tk.END, f"{key} {value.strip()}\n")
+                except Exception as e:
+                    print(f"[Warning] Skipping malformed line: {stripped} — {e}")
+        except Exception as e:
+            messagebox.showerror("File Error", str(e))
+
+    def start_tx(self):
+        if not self.tx_device:
+            messagebox.showwarning("Not connected", "Please connect to QPG6200L first.")
+            return
+        if not self.cmd_dict:
+            messagebox.showwarning("No file loaded", "Please load a tx.txt file first.")
+            return
+
+        try:
+            dev = self.tx_device
+
+            for key, value in self.cmd_dict.items():
+                try:
+                    if key == "CH":
+                        dev.channel = int(value)
+                    elif key == "AN":
+                        antenna_map = {"0": dev.AntennaValues.A0, "1": dev.AntennaValues.A1}
+                        dev.antenna = antenna_map.get(value.strip(), dev.AntennaValues.A0)
+                    elif key == "PHY":
+                        dev.phy = getattr(dev.PhyMode, value.upper())
+                    elif key == "POWER":
+                        dev.power = int(value)
+                    elif key == "PACKETLENGTH":
+                        dev.packet_length = int(value)
+                    elif key == "PACKETINTERVAL":
+                        interval = int(value)
+                    elif key == "PACKETCOUNT":
+                        count = int(value)
+                    elif key == "PM":
+                        dev.pm = value.upper() == "ON"
+                    elif key == "MR":
+                        dev.mr = int(value)
+                    elif key == "SSA":
+                        dev.ssa = int(value)
+                    elif key == "SPAN":
+                        dev.span = int(value)
+                    elif key == "SETTXDATA":
+                        dev.settxdata = value
+                except Exception as attr_err:
+                    raise ValueError(f"[TX ATTR ERROR] Key: {key}, Value: {value}, Error: {attr_err}")
+
+            # Default interval and count if not parsed above
+            interval = int(self.cmd_dict.get("PACKETINTERVAL", 10))
+            count = int(self.cmd_dict.get("PACKETCOUNT", 100))
+
+            # Transmit
+            dev.disable_rx_mode()
+            dev.reset_packet_counters()
+            dev.start_tx_packets(count=count, interval_ms=interval)
+
+            messagebox.showinfo("TX Started", f"Sent {count} packets with {interval}ms interval.")
+
+        except Exception as e:
+            messagebox.showerror("TX Error", f"Invalid value in tx.txt: {e}")
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = QPG6200LApp(root)
+    root.mainloop()
