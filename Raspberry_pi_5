@@ -1,17 +1,1 @@
-C:\Users\rk52524\PycharmProjects\data_real-time\.venv\Scripts\python.exe C:\Users\rk52524\PycharmProjects\data_real-time\gui_pack_err_rate.py 
-[DEBUG] Parsed cmd_dict: {'CH': '11', 'AN': '0', 'PM': 'OFF', 'SPAN': '51900', 'SSA': '65520', 'SETTXDATA': '6188BEBCCAFAFFBCCAF0FF5993925700e7c32f17d6218fede18054795ab83f603d6e97801be04d91b2f2d50a5f8c774cc982bd5544ffa42afc6360d81fb932ef0292dc8950f4b7c3c725be5dafb74beaef7f230a4dde966ac0e73fe731d3bf2ac5f5cbc0be892a803c9b639ebdb560b7c08898aa711778112233445566', 'PACKETCOUNT': '100', 'PACKETINTERVAL': '50', 'MR': '5'}
-Traceback (most recent call last):
-  File "C:\Users\rk52524\PycharmProjects\data_real-time\gui_pack_err_rate.py", line 83, in start_tx
-    dev.antenna = int(value)
-    ^^^^^^^^^^^
-  File "C:\Users\rk52524\PycharmProjects\data_real-time\.venv\Lib\site-packages\qorvo\rcc\rcc_types\property_attribute.py", line 124, in __set__
-    __instance.set_attribute(attr_id, __value.value)
-                                      ^^^^^^^^^^^^^
-AttributeError: 'int' object has no attribute 'value'
 
-During handling of the above exception, another exception occurred:
-
-Traceback (most recent call last):
-  File "C:\Users\rk52524\PycharmProjects\data_real-time\gui_pack_err_rate.py", line 101, in start_tx
-    raise ValueError(f"[TX ATTR ERROR] Key: {key}, Value: {value}, Error: {attr_err}")
-ValueError: [TX ATTR ERROR] Key: AN, Value: 0, Error: 'int' object has no attribute 'value'
