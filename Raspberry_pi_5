@@ -1,114 +1,15 @@
-import tkinter as tk
-from tkinter import filedialog, messagebox
-from qorvo.rcc.ptc_versions.v3 import ptcdriver as ptcv3
+CH 11
+AN 1
+W 0
+PM OFF
+SPAN 51900
+SSA 65520
+SETTXdata 6188BEBCCAFAFFBCCAF0FF5993925700e7c32f17d6218fede18054795ab83f603d6e97801be04d91b2f2d50a5f8c774cc982bd5544ffa42afc6360d81fb932ef0292dc8950f4b7c3c725be5dafb74beaef7f230a4dde966ac0e73fe731d3bf2ac5f5cbc0be892a803c9b639ebdb560b7c08898aa711778112233445566
+packetcount 100
+packetinterval 100
+MR 5
+info
+i
+r
+p
 
-class QPG6200LApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("QPG6200L TX Controller (via SDK)")
-        self.tx_device = None
-        self.cmd_dict = {}
-        self.filename = None
-
-        # GUI
-        tk.Button(root, text="Connect TX (COM7)", command=self.connect_tx).pack(pady=5)
-        self.status_label = tk.Label(root, text="Not connected", fg="red")
-        self.status_label.pack()
-
-        # Load tx.txt
-        tk.Button(root, text="Load tx.txt", command=self.load_file).pack(pady=5)
-        self.text_preview = tk.Text(root, height=10, width=60)
-        self.text_preview.pack()
-
-        # Override packetcount
-        override_frame = tk.Frame(root)
-        override_frame.pack()
-        tk.Label(override_frame, text="Override PACKETCOUNT:").pack(side=tk.LEFT)
-        self.packetcount_override = tk.Entry(override_frame, width=10)
-        self.packetcount_override.insert(0, "100")
-        self.packetcount_override.pack(side=tk.LEFT)
-
-        # TX button
-        tk.Button(root, text="Start TX (Apply Settings + Transmit)", command=self.start_tx).pack(pady=10)
-
-    def connect_tx(self):
-        try:
-            self.tx_device = ptcv3.PTC.new_connection("COM7:115200")
-            info = self.tx_device.get_device_info()
-            self.status_label.config(text=f"Connected to: {info}", fg="green")
-        except Exception as e:
-            messagebox.showerror("Connection Error", str(e))
-            self.status_label.config(text="Connection failed", fg="red")
-
-    def load_file(self):
-        self.filename = filedialog.askopenfilename(filetypes=[("Text files", "*.txt")])
-        if not self.filename:
-            return
-        try:
-            with open(self.filename, "r") as f:
-                lines = f.readlines()
-
-            self.text_preview.delete("1.0", tk.END)
-            self.cmd_dict = {}
-
-            valid_keys = {"CH", "AN", "PHY", "POWER", "PACKETLENGTH", "PACKETINTERVAL", "PACKETCOUNT"}
-
-            for line in lines:
-                stripped = line.strip()
-                if not stripped or " " not in stripped:
-                    continue
-                key, value = stripped.split(None, 1)
-                key = key.upper()
-                if key in valid_keys:
-                    self.cmd_dict[key] = value.strip()
-                    self.text_preview.insert(tk.END, f"{key} {value.strip()}\n")
-        except Exception as e:
-            messagebox.showerror("File Error", str(e))
-
-    def start_tx(self):
-        if not self.tx_device:
-            messagebox.showwarning("Not connected", "Connect to QPG6200L first.")
-            return
-        if not self.cmd_dict:
-            messagebox.showwarning("No file loaded", "Load a tx.txt command file first.")
-            return
-
-        try:
-            dev = self.tx_device
-
-            if "CH" in self.cmd_dict:
-                dev.channel = int(self.cmd_dict["CH"])
-            if "AN" in self.cmd_dict:
-                dev.antenna = int(self.cmd_dict["AN"])
-            if "PHY" in self.cmd_dict:
-                phy_input = self.cmd_dict["PHY"]
-                if hasattr(dev.PhyMode, phy_input.upper()):
-                    dev.phy = getattr(dev.PhyMode, phy_input.upper())
-                else:
-                    raise ValueError(f"Invalid PHY mode: {phy_input}")
-            else:
-                dev.phy = dev.PhyMode.BLE
-            if "POWER" in self.cmd_dict:
-                dev.power = int(self.cmd_dict["POWER"])
-            if "PACKETLENGTH" in self.cmd_dict:
-                dev.packet_length = int(self.cmd_dict["PACKETLENGTH"])
-            if "PACKETINTERVAL" in self.cmd_dict:
-                interval_ms = int(self.cmd_dict["PACKETINTERVAL"])
-            else:
-                interval_ms = 10
-
-            override_count = self.packetcount_override.get().strip()
-            count = int(override_count) if override_count else int(self.cmd_dict.get("PACKETCOUNT", 100))
-
-            dev.disable_rx_mode()
-            dev.reset_packet_counters()
-            dev.start_tx_packets(count=count, interval_ms=interval_ms)
-            messagebox.showinfo("Transmission Started", f"TX started: {count} packets @ interval {interval_ms} ms")
-
-        except Exception as e:
-            messagebox.showerror("TX Error", str(e))
-
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = QPG6200LApp(root)
-    root.mainloop()
