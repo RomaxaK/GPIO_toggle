@@ -1,2 +1,1 @@
-if "SETTXDATA" in self.cmd_dict:
-    dev.settxdata = bytes.fromhex(self.cmd_dict["SETTXDATA"])
+
