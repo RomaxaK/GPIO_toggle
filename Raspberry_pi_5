@@ -51,13 +51,17 @@ class QPG6200LApp:
             self.text_preview.delete("1.0", tk.END)
             self.cmd_dict = {}
 
+            valid_keys = {"CH", "AN", "PHY", "POWER", "PACKETLENGTH", "PACKETINTERVAL", "PACKETCOUNT"}
+
             for line in lines:
                 stripped = line.strip()
                 if not stripped or " " not in stripped:
                     continue
                 key, value = stripped.split(None, 1)
-                self.cmd_dict[key.upper()] = value.strip()
-                self.text_preview.insert(tk.END, f"{key.upper()} {value.strip()}\n")
+                key = key.upper()
+                if key in valid_keys:
+                    self.cmd_dict[key] = value.strip()
+                    self.text_preview.insert(tk.END, f"{key} {value.strip()}\n")
         except Exception as e:
             messagebox.showerror("File Error", str(e))
 
@@ -77,9 +81,13 @@ class QPG6200LApp:
             if "AN" in self.cmd_dict:
                 dev.antenna = int(self.cmd_dict["AN"])
             if "PHY" in self.cmd_dict:
-                dev.phy = getattr(dev.PhyMode, self.cmd_dict["PHY"].upper())
+                phy_input = self.cmd_dict["PHY"]
+                if hasattr(dev.PhyMode, phy_input.upper()):
+                    dev.phy = getattr(dev.PhyMode, phy_input.upper())
+                else:
+                    raise ValueError(f"Invalid PHY mode: {phy_input}")
             else:
-                dev.phy = dev.PhyMode.BLE  # default
+                dev.phy = dev.PhyMode.BLE
             if "POWER" in self.cmd_dict:
                 dev.power = int(self.cmd_dict["POWER"])
             if "PACKETLENGTH" in self.cmd_dict:
