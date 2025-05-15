@@ -50,7 +50,7 @@ class QPG6200LApp:
             for line in lines:
                 stripped = line.strip()
                 if not stripped or " " not in stripped:
-                    continue  # skip one-word lines like "r", "i", "info", "p"
+                    continue  # skip single-word commands like "i", "r", "info", "p"
                 try:
                     key, value = stripped.split(None, 1)
                     key = key.upper()
@@ -72,24 +72,18 @@ class QPG6200LApp:
 
         try:
             dev = self.tx_device
-
             for key, value in self.cmd_dict.items():
                 try:
                     if key == "CH":
                         dev.channel = int(value)
                     elif key == "AN":
-                        antenna_map = {"0": dev.AntennaValues.A0, "1": dev.AntennaValues.A1}
-                        dev.antenna = antenna_map.get(value.strip(), dev.AntennaValues.A0)
+                        dev.antenna = int(value)
                     elif key == "PHY":
                         dev.phy = getattr(dev.PhyMode, value.upper())
                     elif key == "POWER":
                         dev.power = int(value)
                     elif key == "PACKETLENGTH":
                         dev.packet_length = int(value)
-                    elif key == "PACKETINTERVAL":
-                        interval = int(value)
-                    elif key == "PACKETCOUNT":
-                        count = int(value)
                     elif key == "PM":
                         dev.pm = value.upper() == "ON"
                     elif key == "MR":
@@ -99,21 +93,19 @@ class QPG6200LApp:
                     elif key == "SPAN":
                         dev.span = int(value)
                     elif key == "SETTXDATA":
-                        dev.settxdata = value
+                        dev.set_tx_data(value)  # FIXED HERE
                 except Exception as attr_err:
                     raise ValueError(f"[TX ATTR ERROR] Key: {key}, Value: {value}, Error: {attr_err}")
 
-            # Default interval and count if not parsed above
+            # Defaults
             interval = int(self.cmd_dict.get("PACKETINTERVAL", 10))
             count = int(self.cmd_dict.get("PACKETCOUNT", 100))
 
-            # Transmit
             dev.disable_rx_mode()
             dev.reset_packet_counters()
             dev.start_tx_packets(count=count, interval_ms=interval)
 
             messagebox.showinfo("TX Started", f"Sent {count} packets with {interval}ms interval.")
-
         except Exception as e:
             messagebox.showerror("TX Error", f"Invalid value in tx.txt: {e}")
 
