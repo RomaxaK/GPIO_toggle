@@ -15,12 +15,10 @@ class QPG6200LApp:
         self.status_label = tk.Label(root, text="Not connected", fg="red")
         self.status_label.pack()
 
-        # Load tx.txt
         tk.Button(root, text="Load tx.txt", command=self.load_file).pack(pady=5)
         self.text_preview = tk.Text(root, height=10, width=60)
         self.text_preview.pack()
 
-        # Override packetcount
         override_frame = tk.Frame(root)
         override_frame.pack()
         tk.Label(override_frame, text="Override PACKETCOUNT:").pack(side=tk.LEFT)
@@ -28,7 +26,6 @@ class QPG6200LApp:
         self.packetcount_override.insert(0, "100")
         self.packetcount_override.pack(side=tk.LEFT)
 
-        # TX button
         tk.Button(root, text="Start TX (Apply Settings + Transmit)", command=self.start_tx).pack(pady=10)
 
     def connect_tx(self):
@@ -106,6 +103,18 @@ class QPG6200LApp:
             override_count = self.packetcount_override.get().strip()
             count = int(override_count) if override_count else int(self.cmd_dict.get("PACKETCOUNT", 100))
 
+            # Advanced attributes
+            if "PM" in self.cmd_dict:
+                dev.set_attribute("PM", self.cmd_dict["PM"])
+            if "MR" in self.cmd_dict:
+                dev.set_attribute("MR", int(self.cmd_dict["MR"]))
+            if "SSA" in self.cmd_dict:
+                dev.set_attribute("SSA", int(self.cmd_dict["SSA"]))
+            if "SPAN" in self.cmd_dict:
+                dev.set_attribute("SPAN", int(self.cmd_dict["SPAN"]))
+            if "SETTXDATA" in self.cmd_dict:
+                dev.set_attribute("SETTXDATA", self.cmd_dict["SETTXDATA"])
+
             dev.disable_rx_mode()
             dev.reset_packet_counters()
             dev.start_tx_packets(count=count, interval_ms=interval_ms)
@@ -119,4 +128,3 @@ if __name__ == "__main__":
     root = tk.Tk()
     app = QPG6200LApp(root)
     root.mainloop()
-
