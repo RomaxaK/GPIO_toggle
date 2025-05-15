@@ -1,6 +1,8 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from qorvo.rcc.ptc_versions.v3 import ptcdriver as ptcv3
+import threading
+import time
 
 class QPG6200LApp:
     def __init__(self, root):
@@ -9,6 +11,7 @@ class QPG6200LApp:
         self.tx_device = None
         self.cmd_dict = {}
         self.filename = None
+        self.polling = False
 
         # GUI Elements
         tk.Button(root, text="Connect TX (COM7)", command=self.connect_tx).pack(pady=5)
@@ -21,11 +24,20 @@ class QPG6200LApp:
 
         tk.Button(root, text="TX ON (Transmit)", command=self.start_tx).pack(pady=10)
 
+        # TX statistics
+        stats_frame = tk.Frame(root)
+        stats_frame.pack(pady=5)
+        self.tx_ok_label = tk.Label(stats_frame, text="TX OK: 0", font=("Arial", 12))
+        self.tx_ok_label.pack(side=tk.LEFT, padx=20)
+        self.tx_fail_label = tk.Label(stats_frame, text="TX FAIL: 0", font=("Arial", 12))
+        self.tx_fail_label.pack(side=tk.LEFT, padx=20)
+
     def connect_tx(self):
         try:
             self.tx_device = ptcv3.PTC.new_connection("COM7:115200")
             info = self.tx_device.get_device_info()
             self.status_label.config(text=f"Connected to: {info}", fg="green")
+            self.start_polling()
         except Exception as e:
             messagebox.showerror("Connection Error", str(e))
             self.status_label.config(text="Connection failed", fg="red")
@@ -112,6 +124,24 @@ class QPG6200LApp:
 
         except Exception as e:
             messagebox.showerror("TX Error", f"Invalid value in tx.txt: {e}")
+
+    def start_polling(self):
+        if self.polling:
+            return
+        self.polling = True
+        def poll():
+            while self.polling:
+                try:
+                    if self.tx_device:
+                        stats = self.tx_device.get_packet_statistics()
+                        tx_ok = stats.tx_packet_ok
+                        tx_fail = stats.tx_packet_fail
+                        self.tx_ok_label.config(text=f"TX OK: {tx_ok}")
+                        self.tx_fail_label.config(text=f"TX FAIL: {tx_fail}")
+                except Exception as e:
+                    print(f"[Polling error] {e}")
+                time.sleep(1)
+        threading.Thread(target=poll, daemon=True).start()
 
 if __name__ == "__main__":
     root = tk.Tk()
