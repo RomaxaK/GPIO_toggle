@@ -108,7 +108,7 @@ class QPG6200LApp:
                         dev.span = int(value)
                     elif key == "SETTXDATA":
                         hex_data = value.strip()
-                        dev.set_tx_data(bytes.fromhex(hex_data))
+                        dev.settxdata = bytes.fromhex(hex_data)
                 except Exception as attr_err:
                     raise ValueError(f"[TX ATTR ERROR] Key: {key}, Value: {value}, Error: {attr_err}")
 
@@ -127,7 +127,7 @@ class QPG6200LApp:
         while self.poll_stats_running:
             if self.tx_device:
                 try:
-                    response = self.tx_device.send_command("p")
+                    response = self.tx_device._send_line("p")
                     tx_ok = re.search(r"TX OK\s*:\s*(\d+)", response)
                     tx_fail = re.search(r"TX FAIL\s*:\s*(\d+)", response)
                     if tx_ok:
