@@ -1,102 +1,106 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox
-import serial
+from qorvo.rcc.ptc_versions.v3 import ptcdriver as ptcv3
 
-class QPGCommandGUI:
+class QPG6200LApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("QPG6200L Hybrid Controller")
+        self.root.title("QPG6200L TX Controller (via SDK)")
+        self.tx_device = None
+        self.cmd_dict = {}
+        self.filename = None
 
-        self.serial_port = "COM7"
-        self.baud_rate = 115200
-        self.serial_conn = None
-        self.command_lines = []
-
-        # GUI Layout
-        tk.Button(root, text="Connect to QPG6200L", command=self.connect_serial).pack(pady=5)
-        self.status_label = tk.Label(root, text="Status: Not connected", fg="red")
+        # GUI
+        tk.Button(root, text="Connect TX (COM7)", command=self.connect_tx).pack(pady=5)
+        self.status_label = tk.Label(root, text="Not connected", fg="red")
         self.status_label.pack()
+
+        # Load tx.txt
+        tk.Button(root, text="Load tx.txt", command=self.load_file).pack(pady=5)
+        self.text_preview = tk.Text(root, height=10, width=60)
+        self.text_preview.pack()
 
         # Override packetcount
         override_frame = tk.Frame(root)
-        override_frame.pack(pady=5)
-        tk.Label(override_frame, text="Override Packet Count:").pack(side=tk.LEFT)
-        self.packetcount_entry = tk.Entry(override_frame, width=10)
-        self.packetcount_entry.insert(0, "500")
-        self.packetcount_entry.pack(side=tk.LEFT)
+        override_frame.pack()
+        tk.Label(override_frame, text="Override PACKETCOUNT:").pack(side=tk.LEFT)
+        self.packetcount_override = tk.Entry(override_frame, width=10)
+        self.packetcount_override.insert(0, "100")
+        self.packetcount_override.pack(side=tk.LEFT)
 
-        # Load and show command file
-        tk.Button(root, text="Load Command File", command=self.load_file).pack(pady=5)
-        self.command_text = tk.Text(root, height=10, width=60)
-        self.command_text.pack()
+        # TX button
+        tk.Button(root, text="Start TX (Apply Settings + Transmit)", command=self.start_tx).pack(pady=10)
 
-        # Send commands
-        tk.Button(root, text="Send Commands (TX ON)", command=self.send_commands).pack(pady=10)
-
-        # Manual command sender
-        tk.Label(root, text="Send Manual Command:").pack()
-        self.manual_entry = tk.Entry(root, width=40)
-        self.manual_entry.pack()
-        tk.Button(root, text="Send", command=self.send_manual_command).pack(pady=5)
-
-    def connect_serial(self):
+    def connect_tx(self):
         try:
-            self.serial_conn = serial.Serial(self.serial_port, self.baud_rate, timeout=1)
-            self.status_label.config(text="Status: Connected", fg="green")
+            self.tx_device = ptcv3.PTC.new_connection("COM7:115200")
+            info = self.tx_device.get_device_info()
+            self.status_label.config(text=f"Connected to: {info}", fg="green")
         except Exception as e:
             messagebox.showerror("Connection Error", str(e))
-            self.status_label.config(text="Status: Connection failed", fg="red")
+            self.status_label.config(text="Connection failed", fg="red")
 
     def load_file(self):
-        path = filedialog.askopenfilename(filetypes=[("Text Files", "*.txt")])
-        if not path:
+        self.filename = filedialog.askopenfilename(filetypes=[("Text files", "*.txt")])
+        if not self.filename:
             return
         try:
-            with open(path, "r") as f:
-                self.command_lines = f.readlines()
+            with open(self.filename, "r") as f:
+                lines = f.readlines()
 
-            # Apply override for packetcount
-            override_count = self.packetcount_entry.get().strip()
-            new_lines = []
-            for line in self.command_lines:
-                if line.strip().lower().startswith("packetcount"):
-                    new_lines.append(f"PACKETCOUNT {override_count}\n")
-                else:
-                    new_lines.append(line)
-            self.command_lines = new_lines
+            self.text_preview.delete("1.0", tk.END)
+            self.cmd_dict = {}
 
-            self.command_text.delete("1.0", tk.END)
-            self.command_text.insert(tk.END, "".join(self.command_lines))
+            for line in lines:
+                stripped = line.strip()
+                if not stripped or " " not in stripped:
+                    continue
+                key, value = stripped.split(None, 1)
+                self.cmd_dict[key.upper()] = value.strip()
+                self.text_preview.insert(tk.END, f"{key.upper()} {value.strip()}\n")
         except Exception as e:
             messagebox.showerror("File Error", str(e))
 
-    def send_commands(self):
-        if not self.serial_conn or not self.serial_conn.is_open:
-            messagebox.showwarning("Not Connected", "Please connect to QPG6200L first.")
+    def start_tx(self):
+        if not self.tx_device:
+            messagebox.showwarning("Not connected", "Connect to QPG6200L first.")
             return
-        try:
-            for line in self.command_lines:
-                cmd = line.strip()
-                if cmd:
-                    print(f"[SEND] {cmd}")
-                    self.serial_conn.write((cmd + "\n").encode())
+        if not self.cmd_dict:
+            messagebox.showwarning("No file loaded", "Load a tx.txt command file first.")
+            return
 
-            # Trigger TX at the end
-            self.serial_conn.write(("TX\n").encode())
-            print("[SEND] TX")
+        try:
+            dev = self.tx_device
+
+            if "CH" in self.cmd_dict:
+                dev.channel = int(self.cmd_dict["CH"])
+            if "AN" in self.cmd_dict:
+                dev.antenna = int(self.cmd_dict["AN"])
+            if "PHY" in self.cmd_dict:
+                dev.phy = getattr(dev.PhyMode, self.cmd_dict["PHY"].upper())
+            else:
+                dev.phy = dev.PhyMode.BLE  # default
+            if "POWER" in self.cmd_dict:
+                dev.power = int(self.cmd_dict["POWER"])
+            if "PACKETLENGTH" in self.cmd_dict:
+                dev.packet_length = int(self.cmd_dict["PACKETLENGTH"])
+            if "PACKETINTERVAL" in self.cmd_dict:
+                interval_ms = int(self.cmd_dict["PACKETINTERVAL"])
+            else:
+                interval_ms = 10
+
+            override_count = self.packetcount_override.get().strip()
+            count = int(override_count) if override_count else int(self.cmd_dict.get("PACKETCOUNT", 100))
+
+            dev.disable_rx_mode()
+            dev.reset_packet_counters()
+            dev.start_tx_packets(count=count, interval_ms=interval_ms)
+            messagebox.showinfo("Transmission Started", f"TX started: {count} packets @ interval {interval_ms} ms")
+
         except Exception as e:
             messagebox.showerror("TX Error", str(e))
 
-    def send_manual_command(self):
-        if not self.serial_conn or not self.serial_conn.is_open:
-            messagebox.showwarning("Not Connected", "Please connect to QPG6200L first.")
-            return
-        cmd = self.manual_entry.get().strip()
-        if cmd:
-            print(f"[MANUAL SEND] {cmd}")
-            self.serial_conn.write((cmd + "\n").encode())
-
 if __name__ == "__main__":
     root = tk.Tk()
-    app = QPGCommandGUI(root)
+    app = QPG6200LApp(root)
     root.mainloop()
