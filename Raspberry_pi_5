@@ -1,3 +1,1 @@
-    print(f"TX {ptc_TX.get_device_info()}","\n")
-    stats_TX = ptc_TX.get_packet_statistics()
-    print(stats_TX,"\n")
+
