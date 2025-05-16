@@ -1,1 +1,8 @@
+C:\Users\rk52524\PycharmProjects\data_real-time\.venv\Scripts\python.exe C:\Users\rk52524\PycharmProjects\data_real-time\rcc_for_test.py 
+Traceback (most recent call last):
+  File "C:\Users\rk52524\PycharmProjects\data_real-time\rcc_for_test.py", line 7, in <module>
+    from qorvo.rcc.rcc_types.base_types import ByteArray
+ModuleNotFoundError: No module named 'qorvo.rcc.rcc_types.base_types'
+
+Process finished with exit code 1
 
