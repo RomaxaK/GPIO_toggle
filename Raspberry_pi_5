@@ -1,1 +1,78 @@
+import time
+import csv
+from random import shuffle
+import pandas as pd
 
+from qorvo.rcc.ptc_versions.v1 import ptcdriver as ptcv1
+from qorvo.rcc.ptc_versions.v3 import ptcdriver as ptcv3
+
+
+# Parameters
+Test_Channels = list(range(0, 40))
+shuffle(Test_Channels)
+
+TX_packetcount = 100
+Tx_packet_length = 40
+TX_Power = 8
+Config_sleep = 1  # sleep after TX
+timestamp = time.strftime('%d_%m_%Y_%H_%M_%S')
+filename = f"data_TX_Power_{TX_Power}_Packet_Count_{TX_packetcount}_Packet_Length_{Tx_packet_length}_{timestamp}.csv"
+
+
+def main():
+    # TX Setup (QPG6200 on COM7)
+    ptc_TX = ptcv3.PTC.new_connection('COM7:115200')
+    ptc_TX.disable_rx_mode()
+    ptc_TX.stop_tx_packets()
+    ptc_TX.phy = ptc_TX.PhyMode.BLE
+    ptc_TX.antenna = ptc_TX.AntennaValues.AUTO
+    ptc_TX.packet_length = Tx_packet_length
+    ptc_TX.power = TX_Power
+    print(f"TX: {ptc_TX.get_device_info()}\n")
+
+    # RX Setup (QPG7015M at 192.168.1.4:9192)
+    ptc_RX = ptcv1.PTC.new_connection('192.168.1.4:9192')
+    ptc_RX.disable_rx_mode()
+    ptc_RX.phy = ptc_RX.PhyMode.BLE
+    ptc_RX.antenna = ptc_RX.AntennaValues.AUTO
+    print(f"RX: {ptc_RX.get_device_info()}\n")
+
+    # Prepare CSV
+    with open(filename, 'w', newline='') as csv_file:
+        fieldnames = ["BLE_Channel", "RX_Packet_Count", "PER%"]
+        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+        writer.writeheader()
+
+    # Test loop
+    for ch in Test_Channels:
+        ptc_TX.channel = ch
+        ptc_RX.channel = ch
+
+        ptc_TX.reset_packet_counters()
+        ptc_RX.reset_packet_counters()
+
+        ptc_RX.enable_rx_mode()
+        ptc_TX.start_tx_packets(count=TX_packetcount, interval_ms=10)
+        time.sleep(Config_sleep)
+        ptc_TX.stop_tx_packets()
+        ptc_RX.disable_rx_mode()
+
+        rx_stats = ptc_RX.get_packet_statistics()
+        rx_count = rx_stats.rx_packet_count
+        per = 100 * (TX_packetcount - rx_count) / TX_packetcount
+
+        with open(filename, 'a', newline='') as csv_file:
+            writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+            writer.writerow({
+                "BLE_Channel": ch,
+                "RX_Packet_Count": rx_count,
+                "PER%": per
+            })
+
+        print(f"Channel {ch}: RX={rx_count}, PER={per:.2f}%")
+
+    print("\nDone. Results saved in:", filename)
+
+
+if __name__ == "__main__":
+    main()
