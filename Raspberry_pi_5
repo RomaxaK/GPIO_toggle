@@ -112,7 +112,8 @@ class QPG6200LApp:
                     elif key == "SPAN":
                         dev.span = int(value)
                     elif key == "SETTXDATA":
-                        dev.set_tx_data(bytes.fromhex(value))
+                        hex_data = value
+                        dev.settxdata = hex_data.upper()
                 except Exception as attr_err:
                     raise ValueError(f"[TX ATTR ERROR] Key: {key}, Value: {value}, Error: {attr_err}")
 
