@@ -1,1 +1,159 @@
+import tkinter as tk
+from tkinter import filedialog, messagebox
+import threading
+import time
+import re
+from qorvo.rcc.ptc_versions.v3 import ptcdriver as ptcv3
 
+class QPG6200LApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("QPG6200L TX Controller")
+        self.tx_device = None
+        self.cmd_dict = {}
+        self.poll_stats_running = False
+
+        # GUI
+        tk.Button(root, text="Connect TX (COM7)", command=self.connect_tx).pack(pady=5)
+        self.status_label = tk.Label(root, text="Not connected", fg="red")
+        self.status_label.pack()
+
+        tk.Button(root, text="Load tx.txt", command=self.load_file).pack(pady=5)
+        self.text_preview = tk.Text(root, height=12, width=70)
+        self.text_preview.pack()
+
+        self.tx_ok_label = tk.Label(root, text="TX OK: ?", font=("Arial", 10))
+        self.tx_ok_label.pack()
+        self.tx_fail_label = tk.Label(root, text="TX FAIL: ?", font=("Arial", 10))
+        self.tx_fail_label.pack()
+
+        tk.Button(root, text="TX ON (Transmit)", command=self.start_tx).pack(pady=10)
+
+    def connect_tx(self):
+        try:
+            self.tx_device = ptcv3.PTC.new_connection("COM7:115200")
+            info = self.tx_device.get_device_info()
+            self.status_label.config(text=f"Connected to:\n{info}", fg="green")
+
+            self.poll_stats_running = True
+            threading.Thread(target=self.poll_stats_loop, daemon=True).start()
+        except Exception as e:
+            messagebox.showerror("Connection Error", str(e))
+            self.status_label.config(text="Connection failed", fg="red")
+
+    def load_file(self):
+        filepath = filedialog.askopenfilename(filetypes=[("Text files", "*.txt")])
+        if not filepath:
+            return
+        try:
+            with open(filepath, "r") as f:
+                lines = f.readlines()
+            self.text_preview.delete("1.0", tk.END)
+            self.cmd_dict = {}
+            valid_keys = {
+                "CH", "AN", "PHY", "POWER", "PACKETLENGTH", "PACKETINTERVAL", "PACKETCOUNT",
+                "PM", "MR", "SSA", "SPAN", "SETTXDATA"
+            }
+            for line in lines:
+                stripped = line.strip()
+                if not stripped or " " not in stripped:
+                    continue
+                key, value = stripped.split(None, 1)
+                key = key.upper()
+                if key in valid_keys:
+                    self.cmd_dict[key] = value.strip()
+                    self.text_preview.insert(tk.END, f"{key} {value.strip()}\n")
+        except Exception as e:
+            messagebox.showerror("File Error", str(e))
+
+    def start_tx(self):
+        if not self.tx_device:
+            messagebox.showwarning("Not connected", "Connect to device first.")
+            return
+        if not self.cmd_dict:
+            messagebox.showwarning("No file loaded", "Load tx.txt first.")
+            return
+
+        try:
+            dev = self.tx_device
+
+            for key, value in self.cmd_dict.items():
+                try:
+                    if key == "CH":
+                        dev.channel = int(value)
+                    elif key == "AN":
+                        dev.antenna = getattr(dev.AntennaValues, value.upper())
+                    elif key == "PHY":
+                        dev.phy = getattr(dev.PhyMode, value.upper())
+                    elif key == "POWER":
+                        dev.power = int(value)
+                    elif key == "PACKETLENGTH":
+                        dev.packet_length = int(value)
+                    elif key == "PACKETINTERVAL":
+                        interval = int(value)
+                    elif key == "PACKETCOUNT":
+                        count = int(value)
+                    elif key == "PM":
+                        dev.pm = value.upper() == "ON"
+                    elif key == "MR":
+                        dev.mr = int(value)
+                    elif key == "SSA":
+                        dev.ssa = int(value)
+                    elif key == "SPAN":
+                        dev.span = int(value)
+                    elif key == "SETTXDATA":
+                        hex_data = value
+                        dev.set_attribute(ptcv3.Attribute.SETTXDATA, bytes.fromhex(hex_data))
+                except Exception as attr_err:
+                    raise ValueError(f"[TX ATTR ERROR] Key: {key}, Value: {value}, Error: {attr_err}")
+
+            interval = int(self.cmd_dict.get("PACKETINTERVAL", 10))
+            count = int(self.cmd_dict.get("PACKETCOUNT", 100))
+
+            dev.disable_rx_mode()
+            dev.reset_packet_counters()
+            dev.start_tx_packets(count=count, interval_ms=interval)
+
+            messagebox.showinfo("TX Started", f"Sent {count} packets with interval {interval} ms")
+
+        except Exception as e:
+            messagebox.showerror("TX Error", str(e))
+
+    def poll_stats_loop(self):
+        while self.poll_stats_running:
+            if self.tx_device and hasattr(self.tx_device, 'serial'):
+                try:
+                    ser = self.tx_device.serial
+                    ser.reset_input_buffer()
+                    ser.write(b"p\n")
+                    time.sleep(0.5)
+
+                    lines = []
+                    timeout = time.time() + 2
+                    while time.time() < timeout:
+                        if ser.in_waiting:
+                            line = ser.readline().decode(errors="ignore").strip()
+                            if line:
+                                lines.append(line)
+                        else:
+                            time.sleep(0.05)
+
+                    output = "\n".join(lines)
+                    print("[6200 output p]\n", output)
+
+                    tx_ok = re.search(r"TX OK\s*:\s*(\d+)", output)
+                    tx_fail = re.search(r"TX FAIL\s*:\s*(\d+)", output)
+
+                    if tx_ok:
+                        self.tx_ok_label.config(text=f"TX OK: {tx_ok.group(1)}")
+                    if tx_fail:
+                        self.tx_fail_label.config(text=f"TX FAIL: {tx_fail.group(1)}")
+
+                except Exception as e:
+                    print(f"[Polling error] {e}")
+            time.sleep(2)
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = QPG6200LApp(root)
+    root.mainloop()
