@@ -112,8 +112,7 @@ class QPG6200LApp:
                     elif key == "SPAN":
                         dev.span = int(value)
                     elif key == "SETTXDATA":
-                        hex_data = value
-                        dev.settxdata = hex_data.upper()
+                        dev.set_tx_data(bytes.fromhex(value))
                 except Exception as attr_err:
                     raise ValueError(f"[TX ATTR ERROR] Key: {key}, Value: {value}, Error: {attr_err}")
 
@@ -131,8 +130,8 @@ class QPG6200LApp:
             try:
                 if self.tx_device:
                     stats = self.tx_device.get_packet_statistics()
-                    self.tx_ok_label.config(text=f"TX OK: {stats.tx_ok_count}")
-                    self.tx_fail_label.config(text=f"TX FAIL: {stats.tx_fail_count}")
+                    self.tx_ok_label.config(text=f"TX OK: {stats.tx_ok}")
+                    self.tx_fail_label.config(text=f"TX FAIL: {stats.tx_fail}")
             except Exception as e:
                 print(f"[Polling error] {e}")
             time.sleep(2)
